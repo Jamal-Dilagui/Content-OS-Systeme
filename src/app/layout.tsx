@@ -17,7 +17,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}>
+      <head>
+        {/* Inline style to prevent ANY white flash before CSS loads */}
+        <style dangerouslySetInnerHTML={{ __html: `html,body{background:#09090b;background-color:#09090b;}` }} />
+      </head>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`} style={{ backgroundColor: "#09090b" }}>
         <QueryProvider>{children}</QueryProvider>
         <Toaster />
         <SonnerToaster />

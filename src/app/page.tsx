@@ -103,7 +103,14 @@ export default function Home() {
     const pPct = d.pinterest.accountOfDay ? Math.min(100, (d.pinterest.accountOfDay.pinsCompleted / d.pinterest.accountOfDay.pinsPerBatch) * 100) : 0;
     const cPcts = d.categories.map((c) => c.pct);
     const overall = Math.round((pPct + (cPcts.length > 0 ? cPcts.reduce((s, p) => s + p, 0) / cPcts.length : 0)) / (cPcts.length > 0 ? 2 : 1));
-    return { ...d, overallPct: overall, pinterest: { ...d.pinterest, pct: Math.round(pPct) } };
+    // Update today's history point so the chart updates live with actions
+    const history = d.history.map((h, i) => {
+      if (i !== d.history.length - 1) return h; // only update today (last point)
+      const blog = d.categories.find((c) => c.name.toLowerCase() === "blog")?.pct ?? h.blog;
+      const patterns = d.categories.find((c) => c.name.toLowerCase() === "patterns")?.pct ?? h.patterns;
+      return { ...h, pinterest: Math.round(pPct), blog, patterns };
+    });
+    return { ...d, overallPct: overall, pinterest: { ...d.pinterest, pct: Math.round(pPct) }, history };
   };
 
   // ---- Optimistic mutations: UI updates INSTANTLY, NO background refetch (no flash) ----
@@ -235,10 +242,25 @@ export default function Home() {
   const addCategory = useMutation({
     mutationFn: async (body: Record<string, unknown>) =>
       fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
-    onSuccess: (created: Category) => {
-      updateData((prev) => ({ ...prev, categories: [...prev.categories, created] }));
+    onMutate: async (body) => {
+      const tempId = `temp-cat-${Date.now()}`;
+      const tempCat: Category = {
+        id: tempId, name: body.name as string, dailyTarget: (body.dailyTarget as number) || 5,
+        color: (body.color as string) || "violet", icon: "FileText",
+        doneCount: 0, remaining: (body.dailyTarget as number) || 5, pct: 0, tasks: [],
+      };
+      await qc.cancelQueries({ queryKey: ["today"] });
+      updateData((prev) => ({ ...prev, categories: [...prev.categories, tempCat] }));
       toast({ title: "Category added!" });
       setAddCatOpen(false);
+      return { tempId };
+    },
+    onSuccess: (created: Category, _v, ctx) => {
+      if (!ctx?.tempId) return;
+      updateData((prev) => ({
+        ...prev,
+        categories: prev.categories.map((c) => c.id === ctx.tempId ? { ...created, tasks: [] } : c),
+      }));
     },
   });
 
@@ -256,12 +278,23 @@ export default function Home() {
   const addAccount = useMutation({
     mutationFn: async ({ name, pinsPerBatch }: { name: string; pinsPerBatch: number }) =>
       fetch(`/api/pinterest/accounts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, pinsPerBatch }) }).then((r) => r.json()),
-    onSuccess: (created: Account) => {
+    onMutate: async ({ name, pinsPerBatch }) => {
+      const tempId = `temp-acc-${Date.now()}`;
+      const tempAcc: Account = { id: tempId, name, done: false, selected: false, cycle: 1, orderIndex: 999, pinsCompleted: 0, pinsPerBatch };
+      await qc.cancelQueries({ queryKey: ["today"] });
       updateData((prev) => ({
         ...prev,
-        pinterest: { ...prev.pinterest, accounts: [...prev.pinterest.accounts, { ...created, done: false, selected: false }], totalAccounts: prev.pinterest.totalAccounts + 1 },
+        pinterest: { ...prev.pinterest, accounts: [...prev.pinterest.accounts, tempAcc], totalAccounts: prev.pinterest.totalAccounts + 1 },
       }));
       toast({ title: "Account added!" });
+      return { tempId };
+    },
+    onSuccess: (created: Account, _v, ctx) => {
+      if (!ctx?.tempId) return;
+      updateData((prev) => ({
+        ...prev,
+        pinterest: { ...prev.pinterest, accounts: prev.pinterest.accounts.map((a) => a.id === ctx.tempId ? { ...created, done: false, selected: false } : a) },
+      }));
     },
   });
 
@@ -468,10 +501,10 @@ export default function Home() {
             </div>
             {isLoading && <span className="text-[10px] text-zinc-500 animate-pulse">loading…</span>}
           </div>
-          {isLoading ? <Skeleton className="h-56 bg-zinc-800" /> : (
-            <div className="h-56">
+          {isLoading || !data ? <Skeleton className="h-56 bg-zinc-800" /> : (
+            <div className="h-56" style={{ minHeight: 224 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data!.history}>
+                <AreaChart data={data.history} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                   <defs>
                     <linearGradient id="gPin" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
@@ -491,9 +524,9 @@ export default function Home() {
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" unit="%" />
                   <Tooltip contentStyle={{ borderRadius: "0.5rem", border: "1px solid #3f3f46", background: "#18181b", color: "#f4f4f5", fontSize: "0.75rem" }} />
                   <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
-                  <Area type="monotone" dataKey="pinterest" stroke="#8b5cf6" strokeWidth={2} fill="url(#gPin)" name="Pinterest" />
-                  <Area type="monotone" dataKey="blog" stroke="#0ea5e9" strokeWidth={2} fill="url(#gBlog)" name="Blog" />
-                  <Area type="monotone" dataKey="patterns" stroke="#10b981" strokeWidth={2} fill="url(#gPat)" name="Patterns" />
+                  <Area type="monotone" dataKey="pinterest" stroke="#8b5cf6" strokeWidth={2} fill="url(#gPin)" name="Pinterest" isAnimationActive={false} />
+                  <Area type="monotone" dataKey="blog" stroke="#0ea5e9" strokeWidth={2} fill="url(#gBlog)" name="Blog" isAnimationActive={false} />
+                  <Area type="monotone" dataKey="patterns" stroke="#10b981" strokeWidth={2} fill="url(#gPat)" name="Patterns" isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
