@@ -21,7 +21,7 @@ import {
 } from "recharts";
 import {
   CheckCircle2, Circle, Plus, Minus, Image as ImageIcon, Sparkles, Flame, Trophy,
-  Bell, Target, Plus as PlusIcon, Trash2, X, Check, Lock,
+  Bell, Target, Plus as PlusIcon, Trash2, X, Check, Lock, Settings, Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -62,21 +62,43 @@ const COLOR_OPTIONS = ["violet", "sky", "emerald", "amber", "rose", "cyan"];
 export default function Home() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  // Keep previous data during refetch to avoid the flash/skeleton on every action
-  const { data, isLoading, isFetching } = useQuery<TodayData>({
+  const STORAGE_KEY = "content-os-today";
+
+  // Load from localStorage as initial data → instant render on refresh, no white screen
+  const { data, isLoading } = useQuery<TodayData>({
     queryKey: ["today"],
     queryFn: async () => {
       const res = await fetch("/api/today");
       if (!res.ok) throw new Error("Failed");
-      return res.json();
+      const json = await res.json();
+      // Persist to localStorage
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(json)); } catch {}
+      return json;
     },
-    placeholderData: (prev) => prev,
-    staleTime: 5000,
+    initialData: () => {
+      if (typeof window === "undefined") return undefined;
+      try {
+        const cached = localStorage.getItem(STORAGE_KEY);
+        return cached ? JSON.parse(cached) : undefined;
+      } catch { return undefined; }
+    },
+    staleTime: Infinity, // never auto-refetch — we control updates via optimistic mutations
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 
   const [addCatOpen, setAddCatOpen] = React.useState(false);
+  const [manageAccOpen, setManageAccOpen] = React.useState(false);
 
-  // Helper: recompute overallPct from pinterest + categories
+  // Helper: recompute overallPct + persist to localStorage
+  const updateData = (updater: (prev: TodayData) => TodayData) => {
+    const prev = qc.getQueryData<TodayData>(["today"]);
+    if (!prev) return;
+    const next = updater(prev);
+    qc.setQueryData(["today"], next);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+  };
+
   const recompute = (d: TodayData): TodayData => {
     const pPct = d.pinterest.accountOfDay ? Math.min(100, (d.pinterest.accountOfDay.pinsCompleted / d.pinterest.accountOfDay.pinsPerBatch) * 100) : 0;
     const cPcts = d.categories.map((c) => c.pct);
@@ -84,42 +106,34 @@ export default function Home() {
     return { ...d, overallPct: overall, pinterest: { ...d.pinterest, pct: Math.round(pPct) } };
   };
 
-  // ---- Optimistic mutations: UI updates INSTANTLY, server syncs in background ----
+  // ---- Optimistic mutations: UI updates INSTANTLY, NO background refetch (no flash) ----
   const addPin = useMutation({
     mutationFn: async ({ id, delta }: { id: string; delta: number }) =>
       fetch(`/api/pinterest/accounts/${id}/pins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta }) }).then((r) => r.json()),
     onMutate: async ({ id, delta }) => {
       await qc.cancelQueries({ queryKey: ["today"] });
-      const prev = qc.getQueryData<TodayData>(["today"]);
-      if (prev) {
-        const next: TodayData = {
-          ...prev,
-          pinterest: {
-            ...prev.pinterest,
-            accountOfDay: prev.pinterest.accountOfDay && prev.pinterest.accountOfDay.id === id
-              ? { ...prev.pinterest.accountOfDay, pinsCompleted: Math.max(0, Math.min(prev.pinterest.accountOfDay.pinsPerBatch, prev.pinterest.accountOfDay.pinsCompleted + delta)) }
-              : prev.pinterest.accountOfDay,
-            accounts: prev.pinterest.accounts.map((a) => a.id === id ? { ...a, pinsCompleted: Math.max(0, Math.min(a.pinsPerBatch, a.pinsCompleted + delta)) } : a),
-          },
-        };
-        qc.setQueryData(["today"], recompute(next));
-      }
-      return { prev };
+      updateData((prev) => recompute({
+        ...prev,
+        pinterest: {
+          ...prev.pinterest,
+          accountOfDay: prev.pinterest.accountOfDay && prev.pinterest.accountOfDay.id === id
+            ? { ...prev.pinterest.accountOfDay, pinsCompleted: Math.max(0, Math.min(prev.pinterest.accountOfDay.pinsPerBatch, prev.pinterest.accountOfDay.pinsCompleted + delta)) }
+            : prev.pinterest.accountOfDay,
+          accounts: prev.pinterest.accounts.map((a) => a.id === id ? { ...a, pinsCompleted: Math.max(0, Math.min(a.pinsPerBatch, a.pinsCompleted + delta)) } : a),
+        },
+      }));
+      return {};
     },
-    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
 
   const doneAccount = useMutation({
     mutationFn: async (id: string) => fetch(`/api/pinterest/accounts/${id}/done`, { method: "POST" }).then((r) => r.json()),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["today"] });
-      const prev = qc.getQueryData<TodayData>(["today"]);
-      if (prev) {
+      updateData((prev) => {
         const accounts = prev.pinterest.accounts.map((a) => a.id === id ? { ...a, done: true, selected: false, pinsCompleted: a.pinsPerBatch } : a);
-        // Next account of day = first not-done
         const nextAcc = accounts.find((a) => !a.done) ?? null;
-        const next: TodayData = {
+        return recompute({
           ...prev,
           pinterest: {
             ...prev.pinterest,
@@ -127,47 +141,41 @@ export default function Home() {
             accountsDone: accounts.filter((a) => a.done).length,
             accountOfDay: nextAcc ? { id: nextAcc.id, name: nextAcc.name, pinsPerBatch: nextAcc.pinsPerBatch, pinsCompleted: nextAcc.pinsCompleted, cycle: nextAcc.cycle } : null,
           },
-        };
-        qc.setQueryData(["today"], recompute(next));
-      }
-      return { prev };
+        });
+      });
+      toast({ title: "Account done! 🎯", description: "Locked until the cycle completes." });
+      return {};
     },
-    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
-    onSuccess: () => toast({ title: "Account done! 🎯", description: "Locked until the cycle completes." }),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
 
   const selectAccount = useMutation({
     mutationFn: async (id: string) => fetch(`/api/pinterest/accounts/${id}/select`, { method: "POST" }).then((r) => r.json()),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["today"] });
-      const prev = qc.getQueryData<TodayData>(["today"]);
-      if (prev) {
+      updateData((prev) => {
         const accounts = prev.pinterest.accounts.map((a) => ({ ...a, selected: a.id === id }));
         const sel = accounts.find((a) => a.id === id);
-        const next: TodayData = {
+        return recompute({
           ...prev,
           pinterest: {
             ...prev.pinterest,
             accounts,
             accountOfDay: sel ? { id: sel.id, name: sel.name, pinsPerBatch: sel.pinsPerBatch, pinsCompleted: sel.pinsCompleted, cycle: sel.cycle } : prev.pinterest.accountOfDay,
           },
-        };
-        qc.setQueryData(["today"], recompute(next));
-      }
-      return { prev };
+        });
+      });
+      return {};
     },
-    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); toast({ title: "Can't select a done account", variant: "destructive" }); },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
+    onError: () => toast({ title: "Can't select a done account", variant: "destructive" }),
   });
 
   const toggleTask = useMutation({
     mutationFn: async (id: string) => fetch(`/api/tasks/${id}/toggle`, { method: "POST" }).then((r) => r.json()),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["today"] });
-      const prev = qc.getQueryData<TodayData>(["today"]);
-      if (prev) {
-        const categories = prev.categories.map((c) => {
+      updateData((prev) => recompute({
+        ...prev,
+        categories: prev.categories.map((c) => {
           const task = c.tasks.find((t) => t.id === id);
           if (!task) return c;
           const newDone = !task.done;
@@ -175,87 +183,139 @@ export default function Home() {
           const doneCount = tasks.filter((t) => t.done).length;
           const pct = c.dailyTarget > 0 ? Math.min(100, Math.round((doneCount / c.dailyTarget) * 100)) : 0;
           return { ...c, tasks, doneCount, remaining: Math.max(0, c.dailyTarget - doneCount), pct };
-        });
-        qc.setQueryData(["today"], recompute({ ...prev, categories }));
-      }
-      return { prev };
+        }),
+      }));
+      return {};
     },
-    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
 
   const addTask = useMutation({
     mutationFn: async ({ categoryId, title }: { categoryId: string; title: string }) =>
       fetch(`/api/tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId, title }) }).then((r) => r.json()),
     onMutate: async ({ categoryId, title }) => {
+      const tempId = `temp-${Date.now()}`;
       await qc.cancelQueries({ queryKey: ["today"] });
-      const prev = qc.getQueryData<TodayData>(["today"]);
-      if (prev) {
-        const categories = prev.categories.map((c) => {
-          if (c.id !== categoryId) return c;
-          const tasks = [...c.tasks, { id: `temp-${Date.now()}`, title, done: false }];
-          return { ...c, tasks };
-        });
-        qc.setQueryData(["today"], { ...prev, categories });
-      }
-      return { prev };
+      updateData((prev) => ({
+        ...prev,
+        categories: prev.categories.map((c) => c.id !== categoryId ? c : { ...c, tasks: [...c.tasks, { id: tempId, title, done: false }] }),
+      }));
+      return { tempId };
     },
-    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
+    onSuccess: (created: { id: string }, _v, ctx) => {
+      // Replace temp ID with real ID from server (no refetch needed)
+      if (!ctx?.tempId) return;
+      updateData((prev) => ({
+        ...prev,
+        categories: prev.categories.map((c) => ({
+          ...c,
+          tasks: c.tasks.map((t) => t.id === ctx.tempId ? { id: created.id, title: t.title, done: t.done } : t),
+        })),
+      }));
+    },
   });
 
   const deleteTask = useMutation({
     mutationFn: async (id: string) => fetch(`/api/tasks?id=${id}`, { method: "DELETE" }).then((r) => r.json()),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["today"] });
-      const prev = qc.getQueryData<TodayData>(["today"]);
-      if (prev) {
-        const categories = prev.categories.map((c) => {
+      updateData((prev) => recompute({
+        ...prev,
+        categories: prev.categories.map((c) => {
           const tasks = c.tasks.filter((t) => t.id !== id);
           if (tasks.length === c.tasks.length) return c;
           const doneCount = tasks.filter((t) => t.done).length;
           const pct = c.dailyTarget > 0 ? Math.min(100, Math.round((doneCount / c.dailyTarget) * 100)) : 0;
           return { ...c, tasks, doneCount, remaining: Math.max(0, c.dailyTarget - doneCount), pct };
-        });
-        qc.setQueryData(["today"], recompute({ ...prev, categories }));
-      }
-      return { prev };
+        }),
+      }));
+      return {};
     },
-    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
 
   const addCategory = useMutation({
     mutationFn: async (body: Record<string, unknown>) =>
       fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["today"] }); toast({ title: "Category added!" }); setAddCatOpen(false); },
+    onSuccess: (created: Category) => {
+      updateData((prev) => ({ ...prev, categories: [...prev.categories, created] }));
+      toast({ title: "Category added!" });
+      setAddCatOpen(false);
+    },
   });
+
   const deleteCategory = useMutation({
     mutationFn: async (id: string) => fetch(`/api/categories/${id}`, { method: "DELETE" }).then((r) => r.json()),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["today"] });
-      const prev = qc.getQueryData<TodayData>(["today"]);
-      if (prev) qc.setQueryData(["today"], { ...prev, categories: prev.categories.filter((c) => c.id !== id) });
-      return { prev };
+      updateData((prev) => ({ ...prev, categories: prev.categories.filter((c) => c.id !== id) }));
+      toast({ title: "Category removed" });
+      return {};
     },
-    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
-    onSuccess: () => toast({ title: "Category removed" }),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
+  });
+
+  // ---- Pinterest account CRUD ----
+  const addAccount = useMutation({
+    mutationFn: async ({ name, pinsPerBatch }: { name: string; pinsPerBatch: number }) =>
+      fetch(`/api/pinterest/accounts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, pinsPerBatch }) }).then((r) => r.json()),
+    onSuccess: (created: Account) => {
+      updateData((prev) => ({
+        ...prev,
+        pinterest: { ...prev.pinterest, accounts: [...prev.pinterest.accounts, { ...created, done: false, selected: false }], totalAccounts: prev.pinterest.totalAccounts + 1 },
+      }));
+      toast({ title: "Account added!" });
+    },
+  });
+
+  const editAccount = useMutation({
+    mutationFn: async ({ id, name, pinsPerBatch }: { id: string; name: string; pinsPerBatch: number }) =>
+      fetch(`/api/pinterest/accounts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, pinsPerBatch }) }).then((r) => r.json()),
+    onMutate: async ({ id, name, pinsPerBatch }) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      updateData((prev) => ({
+        ...prev,
+        pinterest: {
+          ...prev.pinterest,
+          accounts: prev.pinterest.accounts.map((a) => a.id === id ? { ...a, name, pinsPerBatch } : a),
+          accountOfDay: prev.pinterest.accountOfDay && prev.pinterest.accountOfDay.id === id ? { ...prev.pinterest.accountOfDay, name, pinsPerBatch } : prev.pinterest.accountOfDay,
+        },
+      }));
+      toast({ title: "Account updated" });
+      return {};
+    },
+  });
+
+  const deleteAccount = useMutation({
+    mutationFn: async (id: string) => fetch(`/api/pinterest/accounts/${id}`, { method: "DELETE" }).then((r) => r.json()),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      updateData((prev) => {
+        const accounts = prev.pinterest.accounts.filter((a) => a.id !== id);
+        const accountOfDay = prev.pinterest.accountOfDay && prev.pinterest.accountOfDay.id === id
+          ? (accounts.find((a) => !a.done) ? { id: accounts.find((a) => !a.done)!.id, name: accounts.find((a) => !a.done)!.name, pinsPerBatch: accounts.find((a) => !a.done)!.pinsPerBatch, pinsCompleted: accounts.find((a) => !a.done)!.pinsCompleted, cycle: accounts.find((a) => !a.done)!.cycle } : null)
+          : prev.pinterest.accountOfDay;
+        return recompute({
+          ...prev,
+          pinterest: { ...prev.pinterest, accounts, totalAccounts: accounts.length, accountsDone: accounts.filter((a) => a.done).length, accountOfDay },
+        });
+      });
+      toast({ title: "Account removed" });
+      return {};
+    },
   });
 
   // Pre-warm all API routes on mount so the first action doesn't trigger compilation
   React.useEffect(() => {
     const warm = async () => {
-      // Hit GET routes to trigger compilation in the background
       await Promise.allSettled([
         fetch("/api/today"),
         fetch("/api/categories"),
+        fetch("/api/pinterest/accounts"),
       ]);
-      // Warm the dynamic mutation routes with a dummy id (will 404 but compiles the route)
       await Promise.allSettled([
         fetch("/api/pinterest/accounts/warm/pins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta: 0 }) }).catch(() => {}),
         fetch("/api/pinterest/accounts/warm/done", { method: "POST" }).catch(() => {}),
         fetch("/api/pinterest/accounts/warm/select", { method: "POST" }).catch(() => {}),
+        fetch("/api/pinterest/accounts/warm", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {}),
+        fetch("/api/pinterest/accounts/warm", { method: "DELETE" }).catch(() => {}),
         fetch("/api/tasks/warm/toggle", { method: "POST" }).catch(() => {}),
         fetch("/api/tasks?warm=1", { method: "DELETE" }).catch(() => {}),
       ]);
@@ -321,6 +381,9 @@ export default function Home() {
             <ImageIcon className="h-4 w-4 text-violet-400" />
             <span className="text-xs font-bold uppercase tracking-wider text-violet-300">Pinterest · Working On</span>
             <Badge variant="outline" className="ml-auto border-zinc-700 text-zinc-400">Cycle {data?.pinterest.cycleNumber ?? 1} · {data?.pinterest.accountsDone ?? 0}/{data?.pinterest.totalAccounts ?? 0} done</Badge>
+            <Button size="sm" variant="outline" className="h-7 border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs" onClick={() => setManageAccOpen(true)}>
+              <Settings className="h-3 w-3" /> Manage
+            </Button>
           </div>
           {isLoading ? <Skeleton className="h-20 bg-zinc-800" /> : data?.pinterest.accountOfDay ? (
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -403,7 +466,7 @@ export default function Home() {
               <Target className="h-4 w-4 text-violet-400" />
               <span className="text-sm font-semibold">7-Day Progress (%)</span>
             </div>
-            {isFetching && !isLoading && <span className="text-[10px] text-zinc-500 animate-pulse">updating…</span>}
+            {isLoading && <span className="text-[10px] text-zinc-500 animate-pulse">loading…</span>}
           </div>
           {isLoading ? <Skeleton className="h-56 bg-zinc-800" /> : (
             <div className="h-56">
@@ -514,6 +577,14 @@ export default function Home() {
       </div>
 
       <AddCategoryDialog open={addCatOpen} onOpenChange={setAddCatOpen} onSubmit={(b) => addCategory.mutate(b)} />
+      <ManageAccountsDialog
+        open={manageAccOpen}
+        onOpenChange={setManageAccOpen}
+        accounts={data?.pinterest.accounts ?? []}
+        onAdd={(name, pinsPerBatch) => addAccount.mutate({ name, pinsPerBatch })}
+        onEdit={(id, name, pinsPerBatch) => editAccount.mutate({ id, name, pinsPerBatch })}
+        onDelete={(id) => deleteAccount.mutate(id)}
+      />
     </div>
   );
 }
@@ -631,6 +702,81 @@ function AddCategoryDialog({ open, onOpenChange, onSubmit }: { open: boolean; on
         <DialogFooter>
           <Button variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-200" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button className="bg-violet-600 hover:bg-violet-500 text-white" disabled={!name} onClick={() => onSubmit({ name, dailyTarget: parseInt(target) || 5, color })}>Add Category</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ManageAccountsDialog({
+  open, onOpenChange, accounts, onAdd, onEdit, onDelete,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  accounts: Account[];
+  onAdd: (name: string, pinsPerBatch: number) => void;
+  onEdit: (id: string, name: string, pinsPerBatch: number) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [newName, setNewName] = React.useState("");
+  const [newPins, setNewPins] = React.useState("30");
+  const [editId, setEditId] = React.useState<string | null>(null);
+  const [editName, setEditName] = React.useState("");
+  const [editPins, setEditPins] = React.useState("30");
+
+  React.useEffect(() => {
+    if (open) { setNewName(""); setNewPins("30"); setEditId(null); }
+  }, [open]);
+
+  const startEdit = (a: Account) => { setEditId(a.id); setEditName(a.name); setEditPins(String(a.pinsPerBatch)); };
+  const saveEdit = () => {
+    if (!editId || !editName.trim()) return;
+    onEdit(editId, editName.trim(), parseInt(editPins) || 30);
+    setEditId(null);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg bg-zinc-900 border-zinc-800">
+        <DialogHeader><DialogTitle className="text-zinc-100 flex items-center gap-2"><ImageIcon className="h-4 w-4 text-violet-400" /> Manage Pinterest Accounts</DialogTitle></DialogHeader>
+
+        {/* Add new account */}
+        <div className="flex items-center gap-2 py-2 border-b border-zinc-800 pb-3">
+          <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Account name..." className="bg-zinc-800 border-zinc-700 flex-1" />
+          <Input type="number" min={1} value={newPins} onChange={(e) => setNewPins(e.target.value)} className="bg-zinc-800 border-zinc-700 w-20" />
+          <Button className="bg-violet-600 hover:bg-violet-500 text-white" disabled={!newName.trim()} onClick={() => { onAdd(newName.trim(), parseInt(newPins) || 30); setNewName(""); setNewPins("30"); }}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* List of accounts */}
+        <div className="flex flex-col gap-1.5 max-h-80 overflow-y-auto py-2">
+          {accounts.length === 0 && <p className="text-xs text-zinc-500 py-4 text-center">No accounts yet. Add one above.</p>}
+          {accounts.map((a, i) => (
+            <div key={a.id} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-800/30 p-2">
+              <span className="text-xs font-mono text-zinc-500 w-6 text-center">{i + 1}</span>
+              {editId === a.id ? (
+                <>
+                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="bg-zinc-800 border-zinc-700 h-8 flex-1 text-sm" autoFocus />
+                  <Input type="number" min={1} value={editPins} onChange={(e) => setEditPins(e.target.value)} className="bg-zinc-800 border-zinc-700 h-8 w-16 text-sm" />
+                  <Button size="sm" className="h-8 px-2 bg-emerald-600 hover:bg-emerald-500 text-white" onClick={saveEdit}><Check className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="ghost" className="h-8 px-2 text-zinc-400" onClick={() => setEditId(null)}><X className="h-3.5 w-3.5" /></Button>
+                </>
+              ) : (
+                <>
+                  <span className="text-sm font-medium text-zinc-200 flex-1 truncate">{a.name}</span>
+                  <Badge variant="outline" className="border-zinc-700 text-zinc-400 text-[10px]">{a.pinsPerBatch} pins</Badge>
+                  {a.done && <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-[10px]">done</Badge>}
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-zinc-400 hover:text-zinc-200" onClick={() => startEdit(a)}><Pencil className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-zinc-400 hover:text-rose-400" onClick={() => { if (confirm(`Delete "${a.name}"?`)) onDelete(a.id); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-200" onClick={() => onOpenChange(false)}>Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
