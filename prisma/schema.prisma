@@ -1,0 +1,399 @@
+// Online Business Operating System - Prisma Schema
+// A scalable operating system for a solo online content business
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// BUSINESS STRUCTURE
+// ============================================================
+
+model Business {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  websites    Website[]
+  niches      Niche[]
+}
+
+model Niche {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  websites    Website[]
+  pinterestAccounts PinterestAccount[]
+  products    DigitalProduct[]
+  createdAt   DateTime @default(now())
+}
+
+model Website {
+  id          String   @id @default(cuid())
+  name        String
+  url         String?
+  nicheId     String?
+  niche       Niche?   @relation(fields: [nicheId], references: [id])
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  articles    BlogArticle[]
+  pinterestAccounts PinterestAccount[]
+  facebookPages FacebookPage[]
+  createdAt   DateTime @default(now())
+}
+
+// ============================================================
+// PINTEREST SYSTEM
+// ============================================================
+
+model PinterestAccount {
+  id              String   @id @default(cuid())
+  name            String
+  nicheId         String?
+  niche           Niche?   @relation(fields: [nicheId], references: [id])
+  websiteId       String?
+  website         Website? @relation(fields: [websiteId], references: [id])
+  targetAudience  String?
+  status          String   @default("ACTIVE") // ACTIVE, PAUSED, SKIPPED
+  priority        Int      @default(0)
+  orderIndex      Int      @default(0)
+  currentCycle    Int      @default(1)
+  pinsPerBatch    Int      @default(30)
+  pinsCompleted   Int      @default(0)
+  pinsPublished   Int      @default(0)
+  lastWorkedDate  DateTime?
+  nextWorkDate    DateTime?
+  trafficGenerated Int     @default(0)
+  revenueGenerated Float   @default(0)
+  boards          PinterestBoard[]
+  pins            PinterestPin[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model PinterestBoard {
+  id          String   @id @default(cuid())
+  name        String
+  accountId   String
+  account     PinterestAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  pins        PinterestPin[]
+  createdAt   DateTime @default(now())
+}
+
+model PinterestPin {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     PinterestAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  boardId     String?
+  board       PinterestBoard? @relation(fields: [boardId], references: [id])
+  contentType String? // article, product, etc
+  articleId   String?
+  productId   String?
+  hook        String?
+  mainText    String?
+  cta         String?
+  keywords    String?
+  title       String
+  description String?
+  url         String?
+  imageUrl    String?
+  status      String   @default("IDEA") // IDEA, BRIEF, DESIGN, READY, SCHEDULED, PUBLISHED, FAILED, REVISE
+  scheduledDate DateTime?
+  publishedDate DateTime?
+  impressions Int      @default(0)
+  saves       Int      @default(0)
+  outboundClicks Int   @default(0)
+  engagement  Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================================
+// BLOG SYSTEM
+// ============================================================
+
+model BlogArticle {
+  id          String   @id @default(cuid())
+  websiteId   String
+  website     Website @relation(fields: [websiteId], references: [id])
+  title       String
+  keyword     String?
+  url         String?
+  status      String   @default("IDEA") // IDEA, KEYWORD, BRIEF, OUTLINE, WRITING, SEO, IMAGE, INTERNAL_LINKS, REVIEW, READY, PUBLISHED, PROMOTED
+  organicTraffic Int   @default(0)
+  clicks      Int      @default(0)
+  affiliateClicks Int  @default(0)
+  productClicks Int    @default(0)
+  revenue     Float    @default(0)
+  publishedDate DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================================
+// DIGITAL PRODUCT SYSTEM
+// ============================================================
+
+model DigitalProduct {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   @default("PDF") // PDF, CROCHET_PATTERN, etc
+  nicheId     String?
+  niche       Niche?   @relation(fields: [nicheId], references: [id])
+  status      String   @default("IDEA") // IDEA, VALIDATION, RESEARCH, CREATION, DESIGN, PROOFREADING, PDF, COVER, LISTING, PRODUCT_IMAGES, SEO, PUBLISH, PROMOTION, LIVE, OPTIMIZATION
+  platform    String?  // Etsy, Payhip, etc
+  price       Float    @default(0)
+  unitsSold   Int      @default(0)
+  revenue     Float    @default(0)
+  conversionRate Float  @default(0)
+  // Crochet pattern fields
+  difficulty  String?
+  materials   String?
+  sizes       String?
+  gauge       String?
+  stitches    String?
+  publishedDate DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ProductPlatform {
+  id          String   @id @default(cuid())
+  name        String
+  fee         Float    @default(0)
+  createdAt   DateTime @default(now())
+}
+
+// ============================================================
+// FACEBOOK SYSTEM (optional / future)
+// ============================================================
+
+model FacebookPage {
+  id          String   @id @default(cuid())
+  name        String
+  nicheId     String?
+  websiteId   String?
+  website     Website? @relation(fields: [websiteId], references: [id])
+  status      String   @default("ACTIVE")
+  followers   Int      @default(0)
+  posts       FacebookPost[]
+  createdAt   DateTime @default(now())
+}
+
+model FacebookPost {
+  id          String   @id @default(cuid())
+  pageId      String
+  page        FacebookPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  caption     String?
+  cta         String?
+  url         String?
+  imageUrl    String?
+  status      String   @default("IDEA")
+  scheduledDate DateTime?
+  publishedDate DateTime?
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  engagement  Float    @default(0)
+  createdAt   DateTime @default(now())
+}
+
+// ============================================================
+// TASKS & CALENDAR & CAMPAIGNS
+// ============================================================
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("TODO") // TODO, IN_PROGRESS, DONE, BLOCKED
+  priority    String   @default("P2") // P0, P1, P2, P3
+  category    String?  // PINTEREST, BLOG, PRODUCT, ADMIN, FINANCE, etc
+  projectId   String?
+  dueDate     DateTime?
+  businessImpact Int   @default(0)
+  revenuePotential Int @default(0)
+  trafficPotential Int @default(0)
+  urgency     Int      @default(0)
+  effort      Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ContentCalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  type        String   // ARTICLE, PIN, PRODUCT, POST
+  date        DateTime
+  status      String   @default("PLANNED")
+  relatedId   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  channel     String?
+  startDate   DateTime?
+  endDate     DateTime?
+  budget      Float    @default(0)
+  spent       Float    @default(0)
+  revenue     Float    @default(0)
+  status      String   @default("PLANNED")
+  createdAt   DateTime @default(now())
+}
+
+// ============================================================
+// FINANCIAL SYSTEM
+// ============================================================
+
+model Revenue {
+  id          String   @id @default(cuid())
+  date        DateTime
+  source      String   // AFFILIATE, DIGITAL_PRODUCT, ETSY, PAYHIP, OTHER
+  channel     String?  // PINTEREST, BLOG, FACEBOOK
+  amount      Float
+  description String?
+  productId   String?
+  articleId   String?
+  createdAt   DateTime @default(now())
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  date        DateTime
+  category    String   // AI_TOOLS, HOSTING, DOMAINS, SAAS, AUTOMATION, ADS, DESIGN, OTHER
+  channel     String?
+  amount      Float
+  description String?
+  createdAt   DateTime @default(now())
+}
+
+model FinancialGoal {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // MONTHLY, QUARTERLY, YEARLY, LONG_TERM
+  category    String   @default("FINANCIAL") // FINANCIAL, TRAFFIC, CONTENT, PINTEREST, PRODUCT, BUSINESS, PERSONAL
+  metric      String   @default("REVENUE") // REVENUE, TRAFFIC, PINS, ARTICLES, etc
+  targetAmount Float
+  currentAmount Float   @default(0)
+  startDate   DateTime
+  deadline    DateTime
+  status      String   @default("NOT_STARTED") // NOT_STARTED, ON_TRACK, AT_RISK, ACHIEVED, MISSED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================================
+// TRAFFIC ANALYTICS
+// ============================================================
+
+model TrafficAnalytics {
+  id          String   @id @default(cuid())
+  date        DateTime
+  source      String   // PINTEREST, GOOGLE, FACEBOOK, DIRECT, OTHER
+  sessions    Int      @default(0)
+  users       Int      @default(0)
+  pageViews   Int      @default(0)
+  clicks      Int      @default(0)
+  conversions Int      @default(0)
+  revenue     Float    @default(0)
+  createdAt   DateTime @default(now())
+}
+
+// ============================================================
+// REVIEWS
+// ============================================================
+
+model WeeklyReview {
+  id          String   @id @default(cuid())
+  weekStart   DateTime
+  weekEnd     DateTime
+  revenue     Float    @default(0)
+  profit      Float    @default(0)
+  traffic     Int      @default(0)
+  pinsPublished Int    @default(0)
+  articlesPublished Int @default(0)
+  productsLaunched Int @default(0)
+  whatWorked  String?
+  whatDidNotWork String?
+  scaleWhat   String?
+  reduceWhat  String?
+  stopWhat    String?
+  testWhat    String?
+  createdAt   DateTime @default(now())
+}
+
+model MonthlyReview {
+  id          String   @id @default(cuid())
+  month       Int
+  year        Int
+  revenue     Float    @default(0)
+  expenses    Float    @default(0)
+  profit      Float    @default(0)
+  traffic     Int      @default(0)
+  pinsPublished Int    @default(0)
+  articlesPublished Int @default(0)
+  productsLaunched Int @default(0)
+  topChannel  String?
+  topProduct  String?
+  topContent  String?
+  weakestArea String?
+  nextMonthStrategy String?
+  createdAt   DateTime @default(now())
+}
+
+model YearlyGoal {
+  id          String   @id @default(cuid())
+  year        Int
+  revenueTarget Float
+  profitTarget Float
+  trafficTarget Int
+  productsTarget Int
+  articlesTarget Int
+  pinsTarget  Int
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+// ============================================================
+// EXPERIMENTS
+// ============================================================
+
+model Experiment {
+  id          String   @id @default(cuid())
+  hypothesis  String
+  channel     String?
+  change      String?
+  expectedResult String?
+  startDate   DateTime
+  endDate     DateTime?
+  metric      String?
+  result      String?
+  decision    String?  // KEEP, SCALE, MODIFY, STOP
+  status      String   @default("RUNNING") // RUNNING, COMPLETED
+  createdAt   DateTime @default(now())
+}
+
+// ============================================================
+// GROWTH SCORE CONFIG
+// ============================================================
+
+model GrowthScoreConfig {
+  id          String   @id @default(cuid())
+  revenueGrowthWeight Float @default(25)
+  trafficGrowthWeight Float @default(20)
+  contentProductionWeight Float @default(15)
+  pinterestGrowthWeight Float @default(15)
+  productGrowthWeight Float @default(15)
+  profitabilityWeight Float @default(10)
+  updatedAt DateTime @updatedAt
+}

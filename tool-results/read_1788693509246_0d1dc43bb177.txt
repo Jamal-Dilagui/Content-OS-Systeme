@@ -1,0 +1,1636 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+     5→import {
+     6→  Card,
+     7→} from "@/components/ui/card";
+     8→import { Badge } from "@/components/ui/badge";
+     9→import { Button } from "@/components/ui/button";
+    10→import { Input } from "@/components/ui/input";
+    11→import { Label } from "@/components/ui/label";
+    12→import { Progress } from "@/components/ui/progress";
+    13→import { Skeleton } from "@/components/ui/skeleton";
+    14→import { Textarea } from "@/components/ui/textarea";
+    15→import {
+    16→  Table,
+    17→  TableBody,
+    18→  TableCell,
+    19→  TableHead,
+    20→  TableHeader,
+    21→  TableRow,
+    22→} from "@/components/ui/table";
+    23→import {
+    24→  Select,
+    25→  SelectContent,
+    26→  SelectItem,
+    27→  SelectTrigger,
+    28→  SelectValue,
+    29→} from "@/components/ui/select";
+    30→import {
+    31→  Dialog,
+    32→  DialogContent,
+    33→  DialogDescription,
+    34→  DialogFooter,
+    35→  DialogHeader,
+    36→  DialogTitle,
+    37→  DialogTrigger,
+    38→} from "@/components/ui/dialog";
+    39→import {
+    40→  DropdownMenu,
+    41→  DropdownMenuContent,
+    42→  DropdownMenuItem,
+    43→  DropdownMenuSeparator,
+    44→  DropdownMenuTrigger,
+    45→} from "@/components/ui/dropdown-menu";
+    46→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    47→import {
+    48→  PageHeader,
+    49→  SectionHeader,
+    50→  StatusBadge,
+    51→  EmptyState,
+    52→} from "@/components/biz/layout";
+    53→import { StatCard, StatCardSkeleton } from "@/components/biz/stat-card";
+    54→import {
+    55→  formatCurrency,
+    56→  formatNumber,
+    57→  formatPercent,
+    58→  formatDate,
+    59→  formatRelative,
+    60→  statusBadgeClass,
+    61→  STATUS_COLORS,
+    62→} from "@/lib/format";
+    63→import { useToast } from "@/hooks/use-toast";
+    64→import {
+    65→  BarChart,
+    66→  Bar,
+    67→  XAxis,
+    68→  YAxis,
+    69→  CartesianGrid,
+    70→  Tooltip,
+    71→  ResponsiveContainer,
+    72→  Legend,
+    73→} from "recharts";
+    74→import {
+    75→  Image as ImageIcon,
+    76→  Plus,
+    77→  Trash2,
+    78→  Pause,
+    79→  Play,
+    80→  SkipForward,
+    81→  ArrowUp,
+    82→  ArrowDown,
+    83→  Star,
+    84→  MoreHorizontal,
+    85→  Crown,
+    86→  MousePointerClick,
+    87→  Eye,
+    88→  Bookmark,
+    89→  TrendingUp,
+    90→  Users,
+    91→  Award,
+    92→  LayoutGrid,
+    93→  Pin,
+    94→  RefreshCw,
+    95→} from "lucide-react";
+    96→import { cn } from "@/lib/utils";
+    97→
+    98→// ---------- Types ----------
+    99→type AccountOfDay = {
+   100→  id: string;
+   101→  name: string;
+   102→  nicheName: string | null;
+   103→  websiteName: string | null;
+   104→  targetAudience: string | null;
+   105→  status: string;
+   106→  priority: number;
+   107→  currentCycle: number;
+   108→  pinsPerBatch: number;
+   109→  pinsCompleted: number;
+   110→  pinsPublished: number;
+   111→  pinsRemaining: number;
+   112→  lastWorkedDate: string | null;
+   113→  nextWorkDate: string | null;
+   114→  trafficGenerated: number;
+   115→  revenueGenerated: number;
+   116→  pinCount: number;
+   117→};
+   118→
+   119→type Stats = {
+   120→  accountOfDay: AccountOfDay | null;
+   121→  kpis: {
+   122→    pinsCreated: number;
+   123→    pinsPublished: number;
+   124→    pinsScheduled: number;
+   125→    totalImpressions: number;
+   126→    totalSaves: number;
+   127→    totalOutboundClicks: number;
+   128→    avgCtr: number;
+   129→    activeAccounts: number;
+   130→    totalAccounts: number;
+   131→  };
+   132→  best: {
+   133→    pin: {
+   134→      id: string;
+   135→      title: string;
+   136→      impressions: number;
+   137→      saves: number;
+   138→      outboundClicks: number;
+   139→      ctr: number;
+   140→    } | null;
+   141→    account: {
+   142→      id: string;
+   143→      name: string;
+   144→      impressions: number;
+   145→      saves: number;
+   146→      outboundClicks: number;
+   147→      pinsPublished: number;
+   148→    } | null;
+   149→    board: {
+   150→      id: string;
+   151→      name: string;
+   152→      impressions: number;
+   153→      saves: number;
+   154→      outboundClicks: number;
+   155→    } | null;
+   156→  };
+   157→  byAccount: Array<{
+   158→    id: string;
+   159→    name: string;
+   160→    impressions: number;
+   161→    saves: number;
+   162→    outboundClicks: number;
+   163→    pinsPublished: number;
+   164→  }>;
+   165→  statusDistribution: Array<{ status: string; count: number }>;
+   166→  niches: Array<{ id: string; name: string }>;
+   167→  websites: Array<{ id: string; name: string }>;
+   168→};
+   169→
+   170→type Account = {
+   171→  id: string;
+   172→  name: string;
+   173→  nicheId: string | null;
+   174→  nicheName: string | null;
+   175→  websiteId: string | null;
+   176→  websiteName: string | null;
+   177→  targetAudience: string | null;
+   178→  status: string;
+   179→  priority: number;
+   180→  orderIndex: number;
+   181→  currentCycle: number;
+   182→  pinsPerBatch: number;
+   183→  pinsCompleted: number;
+   184→  pinsPublished: number;
+   185→  lastWorkedDate: string | null;
+   186→  nextWorkDate: string | null;
+   187→  trafficGenerated: number;
+   188→  revenueGenerated: number;
+   189→  boards: Array<{ id: string; name: string }>;
+   190→  pinCount: number;
+   191→  impressions: number;
+   192→  saves: number;
+   193→  outboundClicks: number;
+   194→  actualPinsPublished: number;
+   195→  createdAt: string;
+   196→};
+   197→
+   198→type Pin = {
+   199→  id: string;
+   200→  accountId: string;
+   201→  accountName: string | null;
+   202→  boardId: string | null;
+   203→  boardName: string | null;
+   204→  contentType: string | null;
+   205→  title: string;
+   206→  description: string | null;
+   207→  url: string | null;
+   208→  imageUrl: string | null;
+   209→  status: string;
+   210→  hook: string | null;
+   211→  mainText: string | null;
+   212→  cta: string | null;
+   213→  keywords: string | null;
+   214→  scheduledDate: string | null;
+   215→  publishedDate: string | null;
+   216→  impressions: number;
+   217→  saves: number;
+   218→  outboundClicks: number;
+   219→  engagement: number;
+   220→  ctr: number;
+   221→  createdAt: string;
+   222→};
+   223→
+   224→const PIN_STATUSES = [
+   225→  "IDEA",
+   226→  "BRIEF",
+   227→  "DESIGN",
+   228→  "READY",
+   229→  "SCHEDULED",
+   230→  "PUBLISHED",
+   231→  "FAILED",
+   232→  "REVISE",
+   233→];
+   234→
+   235→const ACCOUNT_STATUSES = ["ACTIVE", "PAUSED", "SKIPPED"];
+   236→
+   237→// Solid background color classes for each status (used for progress bars).
+   238→const STATUS_BAR_COLOR: Record<string, string> = {
+   239→  emerald: "bg-emerald-500",
+   240→  amber: "bg-amber-500",
+   241→  rose: "bg-rose-500",
+   242→  sky: "bg-sky-500",
+   243→  cyan: "bg-cyan-500",
+   244→  violet: "bg-violet-500",
+   245→  zinc: "bg-zinc-400",
+   246→};
+   247→
+   248→function statusBarClass(status: string): string {
+   249→  const c = STATUS_COLORS[status] || "zinc";
+   250→  return STATUS_BAR_COLOR[c] || "bg-zinc-400";
+   251→}
+   252→
+   253→// ---------- Main view ----------
+   254→export function PinterestView() {
+   255→  const { toast } = useToast();
+   256→  const qc = useQueryClient();
+   257→
+   258→  const { data: stats, isLoading: statsLoading } = useQuery<Stats>({
+   259→    queryKey: ["pinterest", "stats"],
+   260→    queryFn: async () => {
+   261→      const res = await fetch("/api/pinterest/stats");
+   262→      if (!res.ok) throw new Error("Failed to load stats");
+   263→      return res.json();
+   264→    },
+   265→  });
+   266→
+   267→  const { data: accounts, isLoading: accountsLoading } = useQuery<Account[]>({
+   268→    queryKey: ["pinterest", "accounts"],
+   269→    queryFn: async () => {
+   270→      const res = await fetch("/api/pinterest/accounts");
+   271→      if (!res.ok) throw new Error("Failed to load accounts");
+   272→      return res.json();
+   273→    },
+   274→  });
+   275→
+   276→  // Advance rotation mutation
+   277→  const advance = useMutation({
+   278→    mutationFn: async (id: string) => {
+   279→      const res = await fetch(`/api/pinterest/accounts/${id}/advance`, {
+   280→        method: "POST",
+   281→      });
+   282→      if (!res.ok) throw new Error("Failed to advance");
+   283→      return res.json();
+   284→    },
+   285→    onSuccess: (data) => {
+   286→      qc.invalidateQueries({ queryKey: ["pinterest"] });
+   287→      qc.invalidateQueries({ queryKey: ["dashboard"] });
+   288→      toast({
+   289→        title: "Rotation advanced",
+   290→        description: data.newAccountOfDay
+   291→          ? `Now working: ${data.newAccountOfDay.name}`
+   292→          : "No next active account — add or resume one.",
+   293→      });
+   294→    },
+   295→    onError: () => toast({ title: "Failed to advance rotation", variant: "destructive" }),
+   296→  });
+   297→
+   298→  // Update account mutation
+   299→  const updateAccount = useMutation({
+   300→    mutationFn: async ({
+   301→      id,
+   302→      data,
+   303→    }: {
+   304→      id: string;
+   305→      data: Record<string, unknown>;
+   306→    }) => {
+   307→      const res = await fetch(`/api/pinterest/accounts/${id}`, {
+   308→        method: "PATCH",
+   309→        headers: { "Content-Type": "application/json" },
+   310→        body: JSON.stringify(data),
+   311→      });
+   312→      if (!res.ok) throw new Error("Failed to update");
+   313→      return res.json();
+   314→    },
+   315→    onSuccess: () => {
+   316→      qc.invalidateQueries({ queryKey: ["pinterest"] });
+   317→      qc.invalidateQueries({ queryKey: ["dashboard"] });
+   318→    },
+   319→    onError: () => toast({ title: "Update failed", variant: "destructive" }),
+   320→  });
+   321→
+   322→  // Move account up/down in rotation queue
+   323→  const moveAccount = useMutation({
+   324→    mutationFn: async ({
+   325→      account,
+   326→      direction,
+   327→    }: {
+   328→      account: Account;
+   329→      direction: "up" | "down";
+   330→    }) => {
+   331→      if (!accounts) return;
+   332→      const sorted = [...accounts].sort((a, b) => a.orderIndex - b.orderIndex);
+   333→      const idx = sorted.findIndex((a) => a.id === account.id);
+   334→      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+   335→      if (swapIdx < 0 || swapIdx >= sorted.length) return;
+   336→      const swapWith = sorted[swapIdx];
+   337→
+   338→      // Swap orderIndex values
+   339→      await fetch(`/api/pinterest/accounts/${account.id}`, {
+   340→        method: "PATCH",
+   341→        headers: { "Content-Type": "application/json" },
+   342→        body: JSON.stringify({ orderIndex: swapWith.orderIndex }),
+   343→      });
+   344→      const res = await fetch(`/api/pinterest/accounts/${swapWith.id}`, {
+   345→        method: "PATCH",
+   346→        headers: { "Content-Type": "application/json" },
+   347→        body: JSON.stringify({ orderIndex: account.orderIndex }),
+   348→      });
+   349→      if (!res.ok) throw new Error("Failed to move");
+   350→    },
+   351→    onSuccess: () => {
+   352→      qc.invalidateQueries({ queryKey: ["pinterest"] });
+   353→      qc.invalidateQueries({ queryKey: ["dashboard"] });
+   354→      toast({ title: "Rotation order updated" });
+   355→    },
+   356→    onError: () => toast({ title: "Failed to reorder", variant: "destructive" }),
+   357→  });
+   358→
+   359→  // Delete account
+   360→  const deleteAccount = useMutation({
+   361→    mutationFn: async (id: string) => {
+   362→      const res = await fetch(`/api/pinterest/accounts/${id}`, {
+   363→        method: "DELETE",
+   364→      });
+   365→      if (!res.ok) throw new Error("Failed to delete");
+   366→      return res.json();
+   367→    },
+   368→    onSuccess: () => {
+   369→      qc.invalidateQueries({ queryKey: ["pinterest"] });
+   370→      qc.invalidateQueries({ queryKey: ["dashboard"] });
+   371→      toast({ title: "Account removed" });
+   372→    },
+   373→    onError: () => toast({ title: "Delete failed", variant: "destructive" }),
+   374→  });
+   375→
+   376→  const handleStatusChange = (acc: Account, status: string) => {
+   377→    updateAccount.mutate({ id: acc.id, data: { status } });
+   378→    toast({
+   379→      title: `${acc.name} → ${status.toLowerCase()}`,
+   380→      description:
+   381→        status === "ACTIVE"
+   382→          ? "Account resumed"
+   383→          : status === "PAUSED"
+   384→          ? "Account paused"
+   385→          : "Account skipped for this cycle",
+   386→    });
+   387→  };
+   388→
+   389→  const handlePrioritize = (acc: Account) => {
+   390→    updateAccount.mutate({ id: acc.id, data: { priority: acc.priority > 0 ? 0 : 1 } });
+   391→    toast({
+   392→      title: acc.priority > 0 ? "Priority removed" : "Account prioritized",
+   393→    });
+   394→  };
+   395→
+   396→  const handlePinsPerBatch = (acc: Account, value: number) => {
+   397→    updateAccount.mutate({ id: acc.id, data: { pinsPerBatch: value } });
+   398→    toast({ title: `Daily quantity set to ${value} pins` });
+   399→  };
+   400→
+   401→  const accountOfDay = stats?.accountOfDay ?? null;
+   402→
+   403→  return (
+   404→    <div className="flex flex-col gap-6">
+   405→      <PageHeader
+   406→        icon={<ImageIcon className="h-5 w-5" />}
+   407→        title="Pinterest"
+   408→        description="Manage 10–100+ Pinterest accounts with daily rotation. Each day one account is the focus — produce pins, publish, then advance to the next."
+   409→      />
+   410→
+   411→      {/* KPI ROW */}
+   412→      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+   413→        {statsLoading ? (
+   414→          Array.from({ length: 5 }).map((_, i) => <StatCardSkeleton key={i} />)
+   415→        ) : (
+   416→          <>
+   417→            <StatCard
+   418→              label="Account of the Day"
+   419→              value={
+   420→                <span className="truncate block max-w-full">
+   421→                  {accountOfDay ? accountOfDay.name : "—"}
+   422→                </span>
+   423→              }
+   424→              hint={
+   425→                accountOfDay
+   426→                  ? `${accountOfDay.pinsRemaining} of ${accountOfDay.pinsPerBatch} pins left`
+   427→                  : "No active account"
+   428→              }
+   429→              icon={<Crown className="h-4 w-4" />}
+   430→              accent="amber"
+   431→            />
+   432→            <StatCard
+   433→              label="Pins Created"
+   434→              value={formatNumber(stats?.kpis.pinsCreated ?? 0)}
+   435→              hint={`${stats?.kpis.totalAccounts ?? 0} accounts`}
+   436→              icon={<Pin className="h-4 w-4" />}
+   437→              accent="violet"
+   438→            />
+   439→            <StatCard
+   440→              label="Pins Published"
+   441→              value={formatNumber(stats?.kpis.pinsPublished ?? 0)}
+   442→              hint={`${stats?.kpis.pinsScheduled ?? 0} scheduled`}
+   443→              icon={<TrendingUp className="h-4 w-4" />}
+   444→              accent="emerald"
+   445→            />
+   446→            <StatCard
+   447→              label="Avg CTR"
+   448→              value={formatPercent(stats?.kpis.avgCtr ?? 0, 2)}
+   449→              hint="clicks ÷ impressions"
+   450→              icon={<MousePointerClick className="h-4 w-4" />}
+   451→              accent="sky"
+   452→            />
+   453→            <StatCard
+   454→              label="Total Outbound Clicks"
+   455→              value={formatNumber(stats?.kpis.totalOutboundClicks ?? 0, {
+   456→                compact: true,
+   457→              })}
+   458→              hint={`${formatNumber(stats?.kpis.totalImpressions ?? 0, {
+   459→                compact: true,
+   460→              })} impressions`}
+   461→              icon={<Eye className="h-4 w-4" />}
+   462→              accent="rose"
+   463→            />
+   464→          </>
+   465→        )}
+   466→      </div>
+   467→
+   468→      <Tabs defaultValue="accounts" className="gap-4">
+   469→        <TabsList className="w-fit">
+   470→          <TabsTrigger value="accounts" className="gap-1.5">
+   471→            <Users className="h-3.5 w-3.5" /> Accounts
+   472→          </TabsTrigger>
+   473→          <TabsTrigger value="pins" className="gap-1.5">
+   474→            <Pin className="h-3.5 w-3.5" /> Pins
+   475→          </TabsTrigger>
+   476→          <TabsTrigger value="performance" className="gap-1.5">
+   477→            <Award className="h-3.5 w-3.5" /> Performance
+   478→          </TabsTrigger>
+   479→        </TabsList>
+   480→
+   481→        {/* ===================== ACCOUNTS TAB ===================== */}
+   482→        <TabsContent value="accounts" className="flex flex-col gap-4">
+   483→          {/* Account of the Day hero */}
+   484→          <Card className="p-5 gap-4 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent border-amber-500/30">
+   485→            <div className="flex items-center gap-2">
+   486→              <Crown className="h-4 w-4 text-amber-500" />
+   487→              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+   488→                Account of the Day
+   489→              </span>
+   490→            </div>
+   491→            {statsLoading ? (
+   492→              <Skeleton className="h-32" />
+   493→            ) : accountOfDay ? (
+   494→              <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch lg:justify-between">
+   495→                <div className="flex-1 min-w-0">
+   496→                  <div className="flex flex-wrap items-center gap-2">
+   497→                    <h2 className="text-2xl font-bold">{accountOfDay.name}</h2>
+   498→                    <StatusBadge status={accountOfDay.status} />
+   499→                    {accountOfDay.priority > 0 && (
+   500→                      <Badge variant="outline" className="border-amber-300 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+   501→                        <Star className="h-3 w-3 mr-1 fill-current" /> Priority
+   502→                      </Badge>
+   503→                    )}
+   504→                  </div>
+   505→                  <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+   506→                    <span>Niche: <span className="text-foreground font-medium">{accountOfDay.nicheName ?? "—"}</span></span>
+   507→                    <span>Website: <span className="text-foreground font-medium">{accountOfDay.websiteName ?? "—"}</span></span>
+   508→                    <span>Cycle: <span className="text-foreground font-medium">{accountOfDay.currentCycle}</span></span>
+   509→                  </div>
+   510→                  {accountOfDay.targetAudience && (
+   511→                    <p className="mt-1 text-sm text-muted-foreground">
+   512→                      Audience: <span className="text-foreground">{accountOfDay.targetAudience}</span>
+   513→                    </p>
+   514→                  )}
+   515→
+   516→                  {/* Progress */}
+   517→                  <div className="mt-3 max-w-md">
+   518→                    <div className="flex items-center justify-between text-xs mb-1">
+   519→                      <span className="text-muted-foreground">
+   520→                        {accountOfDay.pinsCompleted} / {accountOfDay.pinsPerBatch} pins completed
+   521→                      </span>
+   522→                      <span className="font-medium">{accountOfDay.pinsRemaining} left</span>
+   523→                    </div>
+   524→                    <Progress
+   525→                      value={
+   526→                        accountOfDay.pinsPerBatch > 0
+   527→                          ? (accountOfDay.pinsCompleted / accountOfDay.pinsPerBatch) * 100
+   528→                          : 0
+   529→                      }
+   530→                      className="h-2"
+   531→                    />
+   532→                  </div>
+   533→
+   534→                  {/* Mini stats grid */}
+   535→                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 max-w-2xl">
+   536→                    <MiniStat label="Pins Published" value={formatNumber(accountOfDay.pinsPublished)} />
+   537→                    <MiniStat label="Last Worked" value={accountOfDay.lastWorkedDate ? formatRelative(accountOfDay.lastWorkedDate) : "—"} />
+   538→                    <MiniStat label="Next Work" value={accountOfDay.nextWorkDate ? formatRelative(accountOfDay.nextWorkDate) : "—"} />
+   539→                    <MiniStat label="Traffic" value={formatNumber(accountOfDay.trafficGenerated, { compact: true })} />
+   540→                  </div>
+   541→                </div>
+   542→
+   543→                <div className="flex flex-col gap-2 lg:w-56 lg:border-l lg:pl-5">
+   544→                  <div className="rounded-lg border bg-card p-3">
+   545→                    <div className="text-xs text-muted-foreground">Revenue generated</div>
+   546→                    <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+   547→                      {formatCurrency(accountOfDay.revenueGenerated)}
+   548→                    </div>
+   549→                  </div>
+   550→                  <Button
+   551→                    onClick={() => advance.mutate(accountOfDay.id)}
+   552→                    disabled={advance.isPending}
+   553→                    className="w-full"
+   554→                  >
+   555→                    <RefreshCw className={cn("h-4 w-4", advance.isPending && "animate-spin")} />
+   556→                    Mark as Worked &amp; Advance
+   557→                  </Button>
+   558→                  <p className="text-[11px] text-muted-foreground text-center">
+   559→                    Resets pinsCompleted, moves account to back of queue
+   560→                  </p>
+   561→                </div>
+   562→              </div>
+   563→            ) : (
+   564→              <EmptyState
+   565→                icon={<Crown className="h-8 w-8" />}
+   566→                title="No active account"
+   567→                description="Add or resume a Pinterest account to set today's focus."
+   568→              />
+   569→            )}
+   570→          </Card>
+   571→
+   572→          {/* Rotation queue */}
+   573→          <Card className="p-4 gap-3">
+   574→            <SectionHeader
+   575→              title="Rotation Queue"
+   576→              description={`${accounts?.length ?? 0} account(s) — ordered by daily rotation. Drag-free up/down controls.`}
+   577→              icon={<RefreshCw className="h-4 w-4" />}
+   578→              actions={<AddAccountDialog niches={stats?.niches ?? []} websites={stats?.websites ?? []} />}
+   579→            />
+   580→            {accountsLoading ? (
+   581→              <div className="flex flex-col gap-2">
+   582→                {Array.from({ length: 5 }).map((_, i) => (
+   583→                  <Skeleton key={i} className="h-12" />
+   584→                ))}
+   585→              </div>
+   586→            ) : !accounts || accounts.length === 0 ? (
+   587→              <EmptyState
+   588→                icon={<Users className="h-8 w-8" />}
+   589→                title="No Pinterest accounts yet"
+   590→                description="Add your first account to start the daily rotation."
+   591→                action={<AddAccountDialog niches={stats?.niches ?? []} websites={stats?.websites ?? []} />}
+   592→              />
+   593→            ) : (
+   594→              <div className="max-h-[28rem] overflow-y-auto -mx-4 px-4">
+   595→                <Table>
+   596→                  <TableHeader>
+   597→                    <TableRow>
+   598→                      <TableHead className="w-[3rem] text-center">#</TableHead>
+   599→                      <TableHead>Account</TableHead>
+   600→                      <TableHead className="hidden md:table-cell">Status</TableHead>
+   601→                      <TableHead className="hidden lg:table-cell text-center">Cycle</TableHead>
+   602→                      <TableHead className="text-center">Pins Done/Pub</TableHead>
+   603→                      <TableHead className="hidden xl:table-cell">Last Work</TableHead>
+   604→                      <TableHead className="hidden xl:table-cell">Next Work</TableHead>
+   605→                      <TableHead className="text-right">Actions</TableHead>
+   606→                    </TableRow>
+   607→                  </TableHeader>
+   608→                  <TableBody>
+   609→                    {accounts.map((acc, idx) => {
+   610→                      const isDay = accountOfDay?.id === acc.id;
+   611→                      return (
+   612→                        <TableRow
+   613→                          key={acc.id}
+   614→                          className={cn(isDay && "bg-amber-500/5")}
+   615→                        >
+   616→                          <TableCell className="text-center font-mono text-xs text-muted-foreground">
+   617→                            {isDay ? (
+   618→                              <Crown className="h-4 w-4 mx-auto text-amber-500" />
+   619→                            ) : (
+   620→                              idx + 1
+   621→                            )}
+   622→                          </TableCell>
+   623→                          <TableCell>
+   624→                            <div className="flex items-center gap-2 min-w-0">
+   625→                              <div className="min-w-0">
+   626→                                <div className="font-medium truncate flex items-center gap-1.5">
+   627→                                  {acc.name}
+   628→                                  {acc.priority > 0 && (
+   629→                                    <Star className="h-3 w-3 text-amber-500 fill-current shrink-0" />
+   630→                                  )}
+   631→                                </div>
+   632→                                <div className="text-xs text-muted-foreground truncate">
+   633→                                  {acc.nicheName ?? "No niche"}
+   634→                                  {acc.websiteName ? ` · ${acc.websiteName}` : ""}
+   635→                                </div>
+   636→                              </div>
+   637→                            </div>
+   638→                          </TableCell>
+   639→                          <TableCell className="hidden md:table-cell">
+   640→                            <StatusBadge status={acc.status} />
+   641→                          </TableCell>
+   642→                          <TableCell className="hidden lg:table-cell text-center tabular-nums">
+   643→                            {acc.currentCycle}
+   644→                          </TableCell>
+   645→                          <TableCell className="text-center">
+   646→                            <div className="text-xs tabular-nums">
+   647→                              <span className="font-medium">{acc.pinsCompleted}</span>
+   648→                              <span className="text-muted-foreground"> / {acc.pinsPerBatch}</span>
+   649→                            </div>
+   650→                            <div className="text-[10px] text-muted-foreground">
+   651→                              {acc.actualPinsPublished} published
+   652→                            </div>
+   653→                          </TableCell>
+   654→                          <TableCell className="hidden xl:table-cell text-xs text-muted-foreground">
+   655→                            {acc.lastWorkedDate ? formatRelative(acc.lastWorkedDate) : "—"}
+   656→                          </TableCell>
+   657→                          <TableCell className="hidden xl:table-cell text-xs text-muted-foreground">
+   658→                            {acc.nextWorkDate ? formatRelative(acc.nextWorkDate) : "—"}
+   659→                          </TableCell>
+   660→                          <TableCell className="text-right">
+   661→                            <div className="flex items-center justify-end gap-1">
+   662→                              <Button
+   663→                                size="icon"
+   664→                                variant="ghost"
+   665→                                className="h-8 w-8"
+   666→                                onClick={() => moveAccount.mutate({ account: acc, direction: "up" })}
+   667→                                disabled={idx === 0 || moveAccount.isPending}
+   668→                                title="Move up"
+   669→                              >
+   670→                                <ArrowUp className="h-3.5 w-3.5" />
+   671→                              </Button>
+   672→                              <Button
+   673→                                size="icon"
+   674→                                variant="ghost"
+   675→                                className="h-8 w-8"
+   676→                                onClick={() => moveAccount.mutate({ account: acc, direction: "down" })}
+   677→                                disabled={idx === accounts.length - 1 || moveAccount.isPending}
+   678→                                title="Move down"
+   679→                              >
+   680→                                <ArrowDown className="h-3.5 w-3.5" />
+   681→                              </Button>
+   682→                              <DropdownMenu>
+   683→                                <DropdownMenuTrigger asChild>
+   684→                                  <Button size="icon" variant="ghost" className="h-8 w-8">
+   685→                                    <MoreHorizontal className="h-4 w-4" />
+   686→                                  </Button>
+   687→                                </DropdownMenuTrigger>
+   688→                                <DropdownMenuContent align="end" className="w-52">
+   689→                                  <DropdownMenuItem
+   690→                                    onClick={() => handlePrioritize(acc)}
+   691→                                  >
+   692→                                    <Star className="h-3.5 w-3.5" />
+   693→                                    {acc.priority > 0 ? "Remove priority" : "Prioritize"}
+   694→                                  </DropdownMenuItem>
+   695→                                  <DropdownMenuSeparator />
+   696→                                  <DropdownMenuItem
+   697→                                    onClick={() => handleStatusChange(acc, "ACTIVE")}
+   698→                                    disabled={acc.status === "ACTIVE"}
+   699→                                  >
+   700→                                    <Play className="h-3.5 w-3.5" /> Resume / Activate
+   701→                                  </DropdownMenuItem>
+   702→                                  <DropdownMenuItem
+   703→                                    onClick={() => handleStatusChange(acc, "PAUSED")}
+   704→                                    disabled={acc.status === "PAUSED"}
+   705→                                  >
+   706→                                    <Pause className="h-3.5 w-3.5" /> Pause
+   707→                                  </DropdownMenuItem>
+   708→                                  <DropdownMenuItem
+   709→                                    onClick={() => handleStatusChange(acc, "SKIPPED")}
+   710→                                    disabled={acc.status === "SKIPPED"}
+   711→                                  >
+   712→                                    <SkipForward className="h-3.5 w-3.5" /> Skip this cycle
+   713→                                  </DropdownMenuItem>
+   714→                                  <DropdownMenuSeparator />
+   715→                                  <PinsPerBatchItem
+   716→                                    current={acc.pinsPerBatch}
+   717→                                    onSelect={(v) => handlePinsPerBatch(acc, v)}
+   718→                                  />
+   719→                                  <DropdownMenuSeparator />
+   720→                                  <DropdownMenuItem
+   721→                                    variant="destructive"
+   722→                                    onClick={() => {
+   723→                                      if (confirm(`Remove "${acc.name}"? This also deletes its boards and pins.`)) {
+   724→                                        deleteAccount.mutate(acc.id);
+   725→                                      }
+   726→                                    }}
+   727→                                  >
+   728→                                    <Trash2 className="h-3.5 w-3.5" /> Remove account
+   729→                                  </DropdownMenuItem>
+   730→                                </DropdownMenuContent>
+   731→                              </DropdownMenu>
+   732→                            </div>
+   733→                          </TableCell>
+   734→                        </TableRow>
+   735→                      );
+   736→                    })}
+   737→                  </TableBody>
+   738→                </Table>
+   739→              </div>
+   740→            )}
+   741→          </Card>
+   742→        </TabsContent>
+   743→
+   744→        {/* ===================== PINS TAB ===================== */}
+   745→        <TabsContent value="pins">
+   746→          <PinsTab accounts={accounts ?? []} />
+   747→        </TabsContent>
+   748→
+   749→        {/* ===================== PERFORMANCE TAB ===================== */}
+   750→        <TabsContent value="performance">
+   751→          <PerformanceTab stats={stats} loading={statsLoading} />
+   752→        </TabsContent>
+   753→      </Tabs>
+   754→    </div>
+   755→  );
+   756→}
+   757→
+   758→// ---------- Mini stat ----------
+   759→function MiniStat({ label, value }: { label: string; value: React.ReactNode }) {
+   760→  return (
+   761→    <div className="rounded-lg border bg-card p-2.5">
+   762→      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+   763→      <div className="text-sm font-semibold truncate">{value}</div>
+   764→    </div>
+   765→  );
+   766→}
+   767→
+   768→// ---------- Pins per batch submenu (renders as nested menu via dialog) ----------
+   769→function PinsPerBatchItem({
+   770→  current,
+   771→  onSelect,
+   772→}: {
+   773→  current: number;
+   774→  onSelect: (v: number) => void;
+   775→}) {
+   776→  const [open, setOpen] = React.useState(false);
+   777→  const [value, setValue] = React.useState<string>(String(current));
+   778→  return (
+   779→    <>
+   780→      <DropdownMenuItem
+   781→        onSelect={() => setOpen(true)}
+   782→      >
+   783→        <LayoutGrid className="h-3.5 w-3.5" /> Change daily quantity…
+   784→      </DropdownMenuItem>
+   785→      <Dialog open={open} onOpenChange={setOpen}>
+   786→        <DialogContent className="sm:max-w-sm">
+   787→          <DialogHeader>
+   788→            <DialogTitle>Daily pin quantity</DialogTitle>
+   789→            <DialogDescription>
+   790→              How many pins to produce per batch for this account.
+   791→            </DialogDescription>
+   792→          </DialogHeader>
+   793→          <Select value={value} onValueChange={setValue}>
+   794→            <SelectTrigger className="w-full">
+   795→              <SelectValue />
+   796→            </SelectTrigger>
+   797→            <SelectContent>
+   798→              {[10, 15, 20, 25, 30, 40, 50, 75, 100].map((n) => (
+   799→                <SelectItem key={n} value={String(n)}>
+   800→                  {n} pins / day
+   801→                </SelectItem>
+   802→              ))}
+   803→            </SelectContent>
+   804→          </Select>
+   805→          <DialogFooter>
+   806→            <Button variant="ghost" onClick={() => setOpen(false)}>
+   807→              Cancel
+   808→            </Button>
+   809→            <Button
+   810→              onClick={() => {
+   811→                onSelect(Number(value));
+   812→                setOpen(false);
+   813→              }}
+   814→            >
+   815→              Save
+   816→            </Button>
+   817→          </DialogFooter>
+   818→        </DialogContent>
+   819→      </Dialog>
+   820→    </>
+   821→  );
+   822→}
+   823→
+   824→// ---------- Add Account dialog ----------
+   825→function AddAccountDialog({
+   826→  niches,
+   827→  websites,
+   828→}: {
+   829→  niches: Array<{ id: string; name: string }>;
+   830→  websites: Array<{ id: string; name: string }>;
+   831→}) {
+   832→  const { toast } = useToast();
+   833→  const qc = useQueryClient();
+   834→  const [open, setOpen] = React.useState(false);
+   835→  const [name, setName] = React.useState("");
+   836→  const [nicheId, setNicheId] = React.useState("");
+   837→  const [websiteId, setWebsiteId] = React.useState("");
+   838→  const [targetAudience, setTargetAudience] = React.useState("");
+   839→  const [pinsPerBatch, setPinsPerBatch] = React.useState("30");
+   840→
+   841→  const create = useMutation({
+   842→    mutationFn: async () => {
+   843→      const res = await fetch("/api/pinterest/accounts", {
+   844→        method: "POST",
+   845→        headers: { "Content-Type": "application/json" },
+   846→        body: JSON.stringify({
+   847→          name,
+   848→          nicheId: nicheId || undefined,
+   849→          websiteId: websiteId || undefined,
+   850→          targetAudience: targetAudience || undefined,
+   851→          pinsPerBatch: Number(pinsPerBatch),
+   852→          status: "ACTIVE",
+   853→        }),
+   854→      });
+   855→      if (!res.ok) throw new Error("Failed");
+   856→      return res.json();
+   857→    },
+   858→    onSuccess: () => {
+   859→      qc.invalidateQueries({ queryKey: ["pinterest"] });
+   860→      qc.invalidateQueries({ queryKey: ["dashboard"] });
+   861→      toast({ title: "Account added to rotation" });
+   862→      setOpen(false);
+   863→      setName("");
+   864→      setNicheId("");
+   865→      setWebsiteId("");
+   866→      setTargetAudience("");
+   867→      setPinsPerBatch("30");
+   868→    },
+   869→    onError: () => toast({ title: "Failed to add account", variant: "destructive" }),
+   870→  });
+   871→
+   872→  return (
+   873→    <Dialog open={open} onOpenChange={setOpen}>
+   874→      <DialogTrigger asChild>
+   875→        <Button size="sm">
+   876→          <Plus className="h-4 w-4" /> Add Account
+   877→        </Button>
+   878→      </DialogTrigger>
+   879→      <DialogContent className="sm:max-w-md">
+   880→        <DialogHeader>
+   881→          <DialogTitle>Add Pinterest Account</DialogTitle>
+   882→          <DialogDescription>
+   883→            New accounts are appended to the end of the daily rotation queue.
+   884→          </DialogDescription>
+   885→        </DialogHeader>
+   886→        <div className="flex flex-col gap-3">
+   887→          <div className="flex flex-col gap-1.5">
+   888→            <Label htmlFor="acc-name">Name *</Label>
+   889→            <Input
+   890→              id="acc-name"
+   891→              placeholder="e.g. Cozy Crochet Co"
+   892→              value={name}
+   893→              onChange={(e) => setName(e.target.value)}
+   894→            />
+   895→          </div>
+   896→          <div className="grid grid-cols-2 gap-3">
+   897→            <div className="flex flex-col gap-1.5">
+   898→              <Label>Niche</Label>
+   899→              <Select value={nicheId} onValueChange={setNicheId}>
+   900→                <SelectTrigger className="w-full">
+   901→                  <SelectValue placeholder="Select niche" />
+   902→                </SelectTrigger>
+   903→                <SelectContent>
+   904→                  {niches.map((n) => (
+   905→                    <SelectItem key={n.id} value={n.id}>
+   906→                      {n.name}
+   907→                    </SelectItem>
+   908→                  ))}
+   909→                </SelectContent>
+   910→              </Select>
+   911→            </div>
+   912→            <div className="flex flex-col gap-1.5">
+   913→              <Label>Website</Label>
+   914→              <Select value={websiteId} onValueChange={setWebsiteId}>
+   915→                <SelectTrigger className="w-full">
+   916→                  <SelectValue placeholder="Select website" />
+   917→                </SelectTrigger>
+   918→                <SelectContent>
+   919→                  {websites.map((w) => (
+   920→                    <SelectItem key={w.id} value={w.id}>
+   921→                      {w.name}
+   922→                    </SelectItem>
+   923→                  ))}
+   924→                </SelectContent>
+   925→              </Select>
+   926→            </div>
+   927→          </div>
+   928→          <div className="flex flex-col gap-1.5">
+   929→            <Label htmlFor="acc-aud">Target audience</Label>
+   930→            <Input
+   931→              id="acc-aud"
+   932→              placeholder="e.g. Crochet enthusiasts"
+   933→              value={targetAudience}
+   934→              onChange={(e) => setTargetAudience(e.target.value)}
+   935→            />
+   936→          </div>
+   937→          <div className="flex flex-col gap-1.5">
+   938→            <Label>Daily pin quantity</Label>
+   939→            <Select value={pinsPerBatch} onValueChange={setPinsPerBatch}>
+   940→              <SelectTrigger className="w-full">
+   941→                <SelectValue />
+   942→              </SelectTrigger>
+   943→              <SelectContent>
+   944→                {[10, 15, 20, 25, 30, 40, 50, 75, 100].map((n) => (
+   945→                  <SelectItem key={n} value={String(n)}>
+   946→                    {n} pins / day
+   947→                  </SelectItem>
+   948→                ))}
+   949→              </SelectContent>
+   950→            </Select>
+   951→          </div>
+   952→        </div>
+   953→        <DialogFooter>
+   954→          <Button variant="ghost" onClick={() => setOpen(false)}>
+   955→            Cancel
+   956→          </Button>
+   957→          <Button onClick={() => create.mutate()} disabled={!name.trim() || create.isPending}>
+   958→            <Plus className="h-4 w-4" /> Add to rotation
+   959→          </Button>
+   960→        </DialogFooter>
+   961→      </DialogContent>
+   962→    </Dialog>
+   963→  );
+   964→}
+   965→
+   966→// ---------- Pins tab ----------
+   967→function PinsTab({ accounts }: { accounts: Account[] }) {
+   968→  const { toast } = useToast();
+   969→  const qc = useQueryClient();
+   970→  const [filterAccount, setFilterAccount] = React.useState<string>("ALL");
+   971→  const [filterStatus, setFilterStatus] = React.useState<string>("ALL");
+   972→
+   973→  const { data: pins, isLoading } = useQuery<Pin[]>({
+   974→    queryKey: ["pinterest", "pins", filterAccount, filterStatus],
+   975→    queryFn: async () => {
+   976→      const params = new URLSearchParams();
+   977→      if (filterAccount !== "ALL") params.set("accountId", filterAccount);
+   978→      if (filterStatus !== "ALL") params.set("status", filterStatus);
+   979→      const res = await fetch(`/api/pinterest/pins?${params.toString()}`);
+   980→      if (!res.ok) throw new Error("Failed to load pins");
+   981→      return res.json();
+   982→    },
+   983→  });
+   984→
+   985→  const updatePin = useMutation({
+   986→    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+   987→      const res = await fetch(`/api/pinterest/pins/${id}`, {
+   988→        method: "PATCH",
+   989→        headers: { "Content-Type": "application/json" },
+   990→        body: JSON.stringify(data),
+   991→      });
+   992→      if (!res.ok) throw new Error("Failed");
+   993→      return res.json();
+   994→    },
+   995→    onSuccess: () => {
+   996→      qc.invalidateQueries({ queryKey: ["pinterest"] });
+   997→      qc.invalidateQueries({ queryKey: ["dashboard"] });
+   998→    },
+   999→    onError: () => toast({ title: "Update failed", variant: "destructive" }),
+  1000→  });
+  1001→
+  1002→  const deletePin = useMutation({
+  1003→    mutationFn: async (id: string) => {
+  1004→      const res = await fetch(`/api/pinterest/pins/${id}`, { method: "DELETE" });
+  1005→      if (!res.ok) throw new Error("Failed");
+  1006→      return res.json();
+  1007→    },
+  1008→    onSuccess: () => {
+  1009→      qc.invalidateQueries({ queryKey: ["pinterest"] });
+  1010→      qc.invalidateQueries({ queryKey: ["dashboard"] });
+  1011→      toast({ title: "Pin deleted" });
+  1012→    },
+  1013→    onError: () => toast({ title: "Delete failed", variant: "destructive" }),
+  1014→  });
+  1015→
+  1016→  const handleStatusChange = (pin: Pin, status: string) => {
+  1017→    updatePin.mutate({ id: pin.id, data: { status } });
+  1018→    toast({
+  1019→      title: `Pin → ${status.toLowerCase()}`,
+  1020→      description: pin.title,
+  1021→    });
+  1022→  };
+  1023→
+  1024→  return (
+  1025→    <Card className="p-4 gap-3">
+  1026→      <SectionHeader
+  1027→        title="Pin Production Pipeline"
+  1028→        description="Track pins from idea through publication. Change status inline."
+  1029→        icon={<Pin className="h-4 w-4" />}
+  1030→        actions={<AddPinDialog accounts={accounts} />}
+  1031→      />
+  1032→
+  1033→      {/* Filters */}
+  1034→      <div className="flex flex-wrap items-center gap-2">
+  1035→        <Select value={filterAccount} onValueChange={setFilterAccount}>
+  1036→          <SelectTrigger size="sm" className="w-[200px]">
+  1037→            <SelectValue placeholder="All accounts" />
+  1038→          </SelectTrigger>
+  1039→          <SelectContent>
+  1040→            <SelectItem value="ALL">All accounts</SelectItem>
+  1041→            {accounts.map((a) => (
+  1042→              <SelectItem key={a.id} value={a.id}>
+  1043→                {a.name}
+  1044→              </SelectItem>
+  1045→            ))}
+  1046→          </SelectContent>
+  1047→        </Select>
+  1048→        <Select value={filterStatus} onValueChange={setFilterStatus}>
+  1049→          <SelectTrigger size="sm" className="w-[160px]">
+  1050→            <SelectValue placeholder="All statuses" />
+  1051→          </SelectTrigger>
+  1052→          <SelectContent>
+  1053→            <SelectItem value="ALL">All statuses</SelectItem>
+  1054→            {PIN_STATUSES.map((s) => (
+  1055→              <SelectItem key={s} value={s}>
+  1056→                {s.charAt(0) + s.slice(1).toLowerCase()}
+  1057→              </SelectItem>
+  1058→            ))}
+  1059→          </SelectContent>
+  1060→        </Select>
+  1061→        <div className="ml-auto text-xs text-muted-foreground">
+  1062→          {pins?.length ?? 0} pin(s)
+  1063→        </div>
+  1064→      </div>
+  1065→
+  1066→      {isLoading ? (
+  1067→        <div className="flex flex-col gap-2">
+  1068→          {Array.from({ length: 6 }).map((_, i) => (
+  1069→            <Skeleton key={i} className="h-12" />
+  1070→          ))}
+  1071→        </div>
+  1072→      ) : !pins || pins.length === 0 ? (
+  1073→        <EmptyState
+  1074→          icon={<Pin className="h-8 w-8" />}
+  1075→          title="No pins found"
+  1076→          description="Try changing the filters, or create your first pin."
+  1077→          action={<AddPinDialog accounts={accounts} />}
+  1078→        />
+  1079→      ) : (
+  1080→        <div className="max-h-[32rem] overflow-y-auto -mx-4 px-4">
+  1081→          <Table>
+  1082→            <TableHeader>
+  1083→              <TableRow>
+  1084→                <TableHead className="min-w-[14rem]">Pin</TableHead>
+  1085→                <TableHead className="hidden md:table-cell">Account</TableHead>
+  1086→                <TableHead className="hidden lg:table-cell">Board</TableHead>
+  1087→                <TableHead>Status</TableHead>
+  1088→                <TableHead className="hidden xl:table-cell">Scheduled</TableHead>
+  1089→                <TableHead className="text-right">Impressions</TableHead>
+  1090→                <TableHead className="text-right hidden sm:table-cell">Saves</TableHead>
+  1091→                <TableHead className="text-right">Clicks</TableHead>
+  1092→                <TableHead className="text-right">CTR</TableHead>
+  1093→                <TableHead className="text-right">Actions</TableHead>
+  1094→              </TableRow>
+  1095→            </TableHeader>
+  1096→            <TableBody>
+  1097→              {pins.map((p) => (
+  1098→                <TableRow key={p.id}>
+  1099→                  <TableCell>
+  1100→                    <div className="min-w-0">
+  1101→                      <div className="font-medium truncate max-w-[14rem]">{p.title}</div>
+  1102→                      <div className="text-xs text-muted-foreground truncate max-w-[14rem]">
+  1103→                        {p.contentType ?? "pin"}{p.url ? ` · ${new URL(p.url).hostname}` : ""}
+  1104→                      </div>
+  1105→                    </div>
+  1106→                  </TableCell>
+  1107→                  <TableCell className="hidden md:table-cell text-sm text-muted-foreground truncate max-w-[10rem]">
+  1108→                    {p.accountName ?? "—"}
+  1109→                  </TableCell>
+  1110→                  <TableCell className="hidden lg:table-cell text-sm text-muted-foreground truncate max-w-[10rem]">
+  1111→                    {p.boardName ?? "—"}
+  1112→                  </TableCell>
+  1113→                  <TableCell>
+  1114→                    <Select
+  1115→                      value={p.status}
+  1116→                      onValueChange={(v) => handleStatusChange(p, v)}
+  1117→                    >
+  1118→                      <SelectTrigger size="sm" className="h-7 w-[8.5rem] text-xs">
+  1119→                        <SelectValue />
+  1120→                      </SelectTrigger>
+  1121→                      <SelectContent>
+  1122→                        {PIN_STATUSES.map((s) => (
+  1123→                          <SelectItem key={s} value={s}>
+  1124→                            {s.charAt(0) + s.slice(1).toLowerCase()}
+  1125→                          </SelectItem>
+  1126→                        ))}
+  1127→                      </SelectContent>
+  1128→                    </Select>
+  1129→                  </TableCell>
+  1130→                  <TableCell className="hidden xl:table-cell text-xs text-muted-foreground">
+  1131→                    {p.scheduledDate ? formatDate(p.scheduledDate) : "—"}
+  1132→                  </TableCell>
+  1133→                  <TableCell className="text-right tabular-nums text-sm">
+  1134→                    {formatNumber(p.impressions, { compact: true })}
+  1135→                  </TableCell>
+  1136→                  <TableCell className="text-right tabular-nums text-sm hidden sm:table-cell">
+  1137→                    {formatNumber(p.saves, { compact: true })}
+  1138→                  </TableCell>
+  1139→                  <TableCell className="text-right tabular-nums text-sm font-medium">
+  1140→                    {formatNumber(p.outboundClicks, { compact: true })}
+  1141→                  </TableCell>
+  1142→                  <TableCell className="text-right tabular-nums text-sm">
+  1143→                    <span className={cn(p.ctr >= 2 ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-muted-foreground")}>
+  1144→                      {formatPercent(p.ctr, 2)}
+  1145→                    </span>
+  1146→                  </TableCell>
+  1147→                  <TableCell className="text-right">
+  1148→                    <DropdownMenu>
+  1149→                      <DropdownMenuTrigger asChild>
+  1150→                        <Button size="icon" variant="ghost" className="h-8 w-8">
+  1151→                          <MoreHorizontal className="h-4 w-4" />
+  1152→                        </Button>
+  1153→                      </DropdownMenuTrigger>
+  1154→                      <DropdownMenuContent align="end" className="w-48">
+  1155→                        <DropdownMenuItem
+  1156→                          variant="destructive"
+  1157→                          onClick={() => {
+  1158→                            if (confirm(`Delete pin "${p.title}"?`)) {
+  1159→                              deletePin.mutate(p.id);
+  1160→                            }
+  1161→                          }}
+  1162→                        >
+  1163→                          <Trash2 className="h-3.5 w-3.5" /> Delete pin
+  1164→                        </DropdownMenuItem>
+  1165→                      </DropdownMenuContent>
+  1166→                    </DropdownMenu>
+  1167→                  </TableCell>
+  1168→                </TableRow>
+  1169→              ))}
+  1170→            </TableBody>
+  1171→          </Table>
+  1172→        </div>
+  1173→      )}
+  1174→    </Card>
+  1175→  );
+  1176→}
+  1177→
+  1178→// ---------- Add Pin dialog ----------
+  1179→function AddPinDialog({ accounts }: { accounts: Account[] }) {
+  1180→  const { toast } = useToast();
+  1181→  const qc = useQueryClient();
+  1182→  const [open, setOpen] = React.useState(false);
+  1183→  const [accountId, setAccountId] = React.useState("");
+  1184→  const [boardId, setBoardId] = React.useState("");
+  1185→  const [title, setTitle] = React.useState("");
+  1186→  const [description, setDescription] = React.useState("");
+  1187→  const [contentType, setContentType] = React.useState("article");
+  1188→  const [url, setUrl] = React.useState("");
+  1189→  const [keywords, setKeywords] = React.useState("");
+  1190→  const [status, setStatus] = React.useState("IDEA");
+  1191→
+  1192→  const selectedAccount = accounts.find((a) => a.id === accountId);
+  1193→
+  1194→  const create = useMutation({
+  1195→    mutationFn: async () => {
+  1196→      const res = await fetch("/api/pinterest/pins", {
+  1197→        method: "POST",
+  1198→        headers: { "Content-Type": "application/json" },
+  1199→        body: JSON.stringify({
+  1200→          accountId,
+  1201→          boardId: boardId || undefined,
+  1202→          title,
+  1203→          description: description || undefined,
+  1204→          contentType: contentType || undefined,
+  1205→          url: url || undefined,
+  1206→          keywords: keywords || undefined,
+  1207→          status,
+  1208→        }),
+  1209→      });
+  1210→      if (!res.ok) throw new Error("Failed");
+  1211→      return res.json();
+  1212→    },
+  1213→    onSuccess: () => {
+  1214→      qc.invalidateQueries({ queryKey: ["pinterest"] });
+  1215→      qc.invalidateQueries({ queryKey: ["dashboard"] });
+  1216→      toast({ title: "Pin created" });
+  1217→      setOpen(false);
+  1218→      setAccountId("");
+  1219→      setBoardId("");
+  1220→      setTitle("");
+  1221→      setDescription("");
+  1222→      setContentType("article");
+  1223→      setUrl("");
+  1224→      setKeywords("");
+  1225→      setStatus("IDEA");
+  1226→    },
+  1227→    onError: () => toast({ title: "Failed to create pin", variant: "destructive" }),
+  1228→  });
+  1229→
+  1230→  return (
+  1231→    <Dialog open={open} onOpenChange={setOpen}>
+  1232→      <DialogTrigger asChild>
+  1233→        <Button size="sm">
+  1234→          <Plus className="h-4 w-4" /> Add Pin
+  1235→        </Button>
+  1236→      </DialogTrigger>
+  1237→      <DialogContent className="sm:max-w-md">
+  1238→        <DialogHeader>
+  1239→          <DialogTitle>Create Pin</DialogTitle>
+  1240→          <DialogDescription>
+  1241→            Add a new pin to the production pipeline.
+  1242→          </DialogDescription>
+  1243→        </DialogHeader>
+  1244→        <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto pr-1">
+  1245→          <div className="flex flex-col gap-1.5">
+  1246→            <Label>Account *</Label>
+  1247→            <Select value={accountId} onValueChange={(v) => { setAccountId(v); setBoardId(""); }}>
+  1248→              <SelectTrigger className="w-full">
+  1249→                <SelectValue placeholder="Select account" />
+  1250→              </SelectTrigger>
+  1251→              <SelectContent>
+  1252→                {accounts.map((a) => (
+  1253→                  <SelectItem key={a.id} value={a.id}>
+  1254→                    {a.name}
+  1255→                  </SelectItem>
+  1256→                ))}
+  1257→              </SelectContent>
+  1258→            </Select>
+  1259→          </div>
+  1260→          {selectedAccount && selectedAccount.boards.length > 0 && (
+  1261→            <div className="flex flex-col gap-1.5">
+  1262→              <Label>Board</Label>
+  1263→              <Select
+  1264→                value={boardId || "__none__"}
+  1265→                onValueChange={(v) => setBoardId(v === "__none__" ? "" : v)}
+  1266→              >
+  1267→                <SelectTrigger className="w-full">
+  1268→                  <SelectValue placeholder="No board" />
+  1269→                </SelectTrigger>
+  1270→                <SelectContent>
+  1271→                  <SelectItem value="__none__">No board</SelectItem>
+  1272→                  {selectedAccount.boards.map((b) => (
+  1273→                    <SelectItem key={b.id} value={b.id}>
+  1274→                      {b.name}
+  1275→                    </SelectItem>
+  1276→                  ))}
+  1277→                </SelectContent>
+  1278→              </Select>
+  1279→            </div>
+  1280→          )}
+  1281→          <div className="flex flex-col gap-1.5">
+  1282→            <Label htmlFor="pin-title">Title *</Label>
+  1283→            <Input
+  1284→              id="pin-title"
+  1285→              placeholder="Pin title"
+  1286→              value={title}
+  1287→              onChange={(e) => setTitle(e.target.value)}
+  1288→            />
+  1289→          </div>
+  1290→          <div className="grid grid-cols-2 gap-3">
+  1291→            <div className="flex flex-col gap-1.5">
+  1292→              <Label>Content type</Label>
+  1293→              <Select value={contentType} onValueChange={setContentType}>
+  1294→                <SelectTrigger className="w-full">
+  1295→                  <SelectValue />
+  1296→                </SelectTrigger>
+  1297→                <SelectContent>
+  1298→                  {["article", "product", "video", "idea"].map((t) => (
+  1299→                    <SelectItem key={t} value={t}>
+  1300→                      {t.charAt(0).toUpperCase() + t.slice(1)}
+  1301→                    </SelectItem>
+  1302→                  ))}
+  1303→                </SelectContent>
+  1304→              </Select>
+  1305→            </div>
+  1306→            <div className="flex flex-col gap-1.5">
+  1307→              <Label>Initial status</Label>
+  1308→              <Select value={status} onValueChange={setStatus}>
+  1309→                <SelectTrigger className="w-full">
+  1310→                  <SelectValue />
+  1311→                </SelectTrigger>
+  1312→                <SelectContent>
+  1313→                  {PIN_STATUSES.slice(0, 4).map((s) => (
+  1314→                    <SelectItem key={s} value={s}>
+  1315→                      {s.charAt(0) + s.slice(1).toLowerCase()}
+  1316→                    </SelectItem>
+  1317→                  ))}
+  1318→                </SelectContent>
+  1319→              </Select>
+  1320→            </div>
+  1321→          </div>
+  1322→          <div className="flex flex-col gap-1.5">
+  1323→            <Label htmlFor="pin-url">Destination URL</Label>
+  1324→            <Input
+  1325→              id="pin-url"
+  1326→              placeholder="https://"
+  1327→              value={url}
+  1328→              onChange={(e) => setUrl(e.target.value)}
+  1329→            />
+  1330→          </div>
+  1331→          <div className="flex flex-col gap-1.5">
+  1332→            <Label htmlFor="pin-keywords">Keywords</Label>
+  1333→            <Input
+  1334→              id="pin-keywords"
+  1335→              placeholder="comma, separated, keywords"
+  1336→              value={keywords}
+  1337→              onChange={(e) => setKeywords(e.target.value)}
+  1338→            />
+  1339→          </div>
+  1340→          <div className="flex flex-col gap-1.5">
+  1341→            <Label htmlFor="pin-desc">Description</Label>
+  1342→            <Textarea
+  1343→              id="pin-desc"
+  1344→              placeholder="Pin description…"
+  1345→              value={description}
+  1346→              onChange={(e) => setDescription(e.target.value)}
+  1347→              rows={3}
+  1348→            />
+  1349→          </div>
+  1350→        </div>
+  1351→        <DialogFooter>
+  1352→          <Button variant="ghost" onClick={() => setOpen(false)}>
+  1353→            Cancel
+  1354→          </Button>
+  1355→          <Button
+  1356→            onClick={() => create.mutate()}
+  1357→            disabled={!accountId || !title.trim() || create.isPending}
+  1358→          >
+  1359→            <Plus className="h-4 w-4" /> Create pin
+  1360→          </Button>
+  1361→        </DialogFooter>
+  1362→      </DialogContent>
+  1363→    </Dialog>
+  1364→  );
+  1365→}
+  1366→
+  1367→// ---------- Performance tab ----------
+  1368→function PerformanceTab({
+  1369→  stats,
+  1370→  loading,
+  1371→}: {
+  1372→  stats: Stats | undefined;
+  1373→  loading: boolean;
+  1374→}) {
+  1375→  if (loading || !stats) {
+  1376→    return (
+  1377→      <div className="flex flex-col gap-4">
+  1378→        <div className="grid gap-3 md:grid-cols-3">
+  1379→          {Array.from({ length: 3 }).map((_, i) => (
+  1380→            <Skeleton key={i} className="h-40" />
+  1381→          ))}
+  1382→        </div>
+  1383→        <Skeleton className="h-72" />
+  1384→      </div>
+  1385→    );
+  1386→  }
+  1387→
+  1388→  const chartData = stats.byAccount
+  1389→    .filter((a) => a.impressions > 0 || a.outboundClicks > 0)
+  1390→    .slice(0, 10)
+  1391→    .map((a) => ({
+  1392→      name: a.name.length > 16 ? a.name.slice(0, 14) + "…" : a.name,
+  1393→      Impressions: a.impressions,
+  1394→      Saves: a.saves,
+  1395→      Clicks: a.outboundClicks,
+  1396→    }));
+  1397→
+  1398→  return (
+  1399→    <div className="flex flex-col gap-4">
+  1400→      {/* Best performers */}
+  1401→      <div className="grid gap-3 md:grid-cols-3">
+  1402→        <BestPerformerCard
+  1403→          icon={<Pin className="h-4 w-4" />}
+  1404→          label="Best-Performing Pin"
+  1405→          title={stats.best.pin?.title ?? "—"}
+  1406→          accent="violet"
+  1407→          metrics={
+  1408→            stats.best.pin
+  1409→              ? [
+  1410→                  { label: "Impressions", value: formatNumber(stats.best.pin.impressions, { compact: true }) },
+  1411→                  { label: "Saves", value: formatNumber(stats.best.pin.saves, { compact: true }) },
+  1412→                  { label: "Clicks", value: formatNumber(stats.best.pin.outboundClicks, { compact: true }) },
+  1413→                  { label: "CTR", value: formatPercent(stats.best.pin.ctr, 2) },
+  1414→                ]
+  1415→              : []
+  1416→          }
+  1417→        />
+  1418→        <BestPerformerCard
+  1419→          icon={<Users className="h-4 w-4" />}
+  1420→          label="Best-Performing Account"
+  1421→          title={stats.best.account?.name ?? "—"}
+  1422→          accent="emerald"
+  1423→          metrics={
+  1424→            stats.best.account
+  1425→              ? [
+  1426→                  { label: "Impressions", value: formatNumber(stats.best.account.impressions, { compact: true }) },
+  1427→                  { label: "Saves", value: formatNumber(stats.best.account.saves, { compact: true }) },
+  1428→                  { label: "Clicks", value: formatNumber(stats.best.account.outboundClicks, { compact: true }) },
+  1429→                  { label: "Published", value: formatNumber(stats.best.account.pinsPublished) },
+  1430→                ]
+  1431→              : []
+  1432→          }
+  1433→        />
+  1434→        <BestPerformerCard
+  1435→          icon={<LayoutGrid className="h-4 w-4" />}
+  1436→          label="Best-Performing Board"
+  1437→          title={stats.best.board?.name ?? "—"}
+  1438→          accent="amber"
+  1439→          metrics={
+  1440→            stats.best.board
+  1441→              ? [
+  1442→                  { label: "Impressions", value: formatNumber(stats.best.board.impressions, { compact: true }) },
+  1443→                  { label: "Saves", value: formatNumber(stats.best.board.saves, { compact: true }) },
+  1444→                  { label: "Clicks", value: formatNumber(stats.best.board.outboundClicks, { compact: true }) },
+  1445→                ]
+  1446→              : []
+  1447→          }
+  1448→        />
+  1449→      </div>
+  1450→
+  1451→      {/* Charts */}
+  1452→      <div className="grid gap-3 lg:grid-cols-3">
+  1453→        <Card className="p-4 gap-3 lg:col-span-2">
+  1454→          <SectionHeader
+  1455→            title="Performance by Account"
+  1456→            description="Impressions, saves & outbound clicks — top 10 accounts"
+  1457→            icon={<TrendingUp className="h-4 w-4" />}
+  1458→          />
+  1459→          {chartData.length === 0 ? (
+  1460→            <EmptyState
+  1461→              icon={<TrendingUp className="h-8 w-8" />}
+  1462→              title="No published-pin performance yet"
+  1463→              description="Once you publish pins and accumulate impressions, per-account metrics will appear here."
+  1464→            />
+  1465→          ) : (
+  1466→            <div className="h-72">
+  1467→              <ResponsiveContainer width="100%" height="100%">
+  1468→                <BarChart data={chartData} margin={{ top: 8, right: 8, bottom: 32, left: 8 }}>
+  1469→                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+  1470→                  <XAxis
+  1471→                    dataKey="name"
+  1472→                    tick={{ fontSize: 10 }}
+  1473→                    stroke="hsl(var(--muted-foreground))"
+  1474→                    angle={-25}
+  1475→                    textAnchor="end"
+  1476→                    interval={0}
+  1477→                    height={50}
+  1478→                  />
+  1479→                  <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => formatNumber(v, { compact: true })} />
+  1480→                  <Tooltip
+  1481→                    contentStyle={{
+  1482→                      borderRadius: "0.5rem",
+  1483→                      border: "1px solid hsl(var(--border))",
+  1484→                      background: "hsl(var(--popover))",
+  1485→                      color: "hsl(var(--popover-foreground))",
+  1486→                      fontSize: "0.75rem",
+  1487→                    }}
+  1488→                    formatter={(v: number) => formatNumber(v)}
+  1489→                  />
+  1490→                  <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
+  1491→                  <Bar dataKey="Impressions" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+  1492→                  <Bar dataKey="Saves" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+  1493→                  <Bar dataKey="Clicks" fill="#10b981" radius={[3, 3, 0, 0]} />
+  1494→                </BarChart>
+  1495→              </ResponsiveContainer>
+  1496→            </div>
+  1497→          )}
+  1498→        </Card>
+  1499→
+  1500→        {/* Status distribution / pipeline funnel */}
+  1501→        <Card className="p-4 gap-3">
+  1502→          <SectionHeader
+  1503→            title="Pin Status Distribution"
+  1504→            description="Pipeline breakdown"
+  1505→            icon={<LayoutGrid className="h-4 w-4" />}
+  1506→          />
+  1507→          <div className="flex flex-col gap-2 max-h-72 overflow-y-auto">
+  1508→            {stats.statusDistribution.map((s) => {
+  1509→              const max = Math.max(...stats.statusDistribution.map((x) => x.count), 1);
+  1510→              const pctVal = (s.count / max) * 100;
+  1511→              return (
+  1512→                <div key={s.status} className="flex flex-col gap-1">
+  1513→                  <div className="flex items-center justify-between text-xs">
+  1514→                    <div className="flex items-center gap-1.5">
+  1515→                      <Badge variant="outline" className={cn("text-[10px] font-medium", statusBadgeClass(s.status))}>
+  1516→                        {s.status}
+  1517→                      </Badge>
+  1518→                    </div>
+  1519→                    <span className="font-semibold tabular-nums">{s.count}</span>
+  1520→                  </div>
+  1521→                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+  1522→                    <div
+  1523→                      className={cn("h-full rounded-full", statusBarClass(s.status))}
+  1524→                      style={{ width: `${pctVal}%` }}
+  1525→                    />
+  1526→                  </div>
+  1527→                </div>
+  1528→              );
+  1529→            })}
+  1530→            {stats.statusDistribution.every((s) => s.count === 0) && (
+  1531→              <p className="text-sm text-muted-foreground text-center py-6">No pins yet.</p>
+  1532→            )}
+  1533→          </div>
+  1534→        </Card>
+  1535→      </div>
+  1536→
+  1537→      {/* Aggregate KPI summary */}
+  1538→      <Card className="p-4 gap-3">
+  1539→        <SectionHeader
+  1540→          title="Aggregate Performance"
+  1541→          description="All-time Pinterest metrics across every account"
+  1542→          icon={<Award className="h-4 w-4" />}
+  1543→        />
+  1544→        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+  1545→          <KpiPill icon={<Pin className="h-4 w-4" />} label="Pins Created" value={formatNumber(stats.kpis.pinsCreated)} accent="violet" />
+  1546→          <KpiPill icon={<TrendingUp className="h-4 w-4" />} label="Published" value={formatNumber(stats.kpis.pinsPublished)} accent="emerald" />
+  1547→          <KpiPill icon={<RefreshCw className="h-4 w-4" />} label="Scheduled" value={formatNumber(stats.kpis.pinsScheduled)} accent="sky" />
+  1548→          <KpiPill icon={<Eye className="h-4 w-4" />} label="Impressions" value={formatNumber(stats.kpis.totalImpressions, { compact: true })} accent="violet" />
+  1549→          <KpiPill icon={<Bookmark className="h-4 w-4" />} label="Saves" value={formatNumber(stats.kpis.totalSaves, { compact: true })} accent="amber" />
+  1550→          <KpiPill icon={<MousePointerClick className="h-4 w-4" />} label="Clicks" value={formatNumber(stats.kpis.totalOutboundClicks, { compact: true })} accent="rose" />
+  1551→        </div>
+  1552→      </Card>
+  1553→    </div>
+  1554→  );
+  1555→}
+  1556→
+  1557→function BestPerformerCard({
+  1558→  icon,
+  1559→  label,
+  1560→  title,
+  1561→  metrics,
+  1562→  accent,
+  1563→}: {
+  1564→  icon: React.ReactNode;
+  1565→  label: string;
+  1566→  title: string;
+  1567→  metrics: Array<{ label: string; value: string }>;
+  1568→  accent: "emerald" | "amber" | "rose" | "sky" | "violet";
+  1569→}) {
+  1570→  const accentMap: Record<string, string> = {
+  1571→    emerald: "text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 bg-emerald-500/5",
+  1572→    amber: "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/30 bg-amber-500/5",
+  1573→    rose: "text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-500/30 bg-rose-500/5",
+  1574→    sky: "text-sky-600 dark:text-sky-400 border-sky-200 dark:border-sky-500/30 bg-sky-500/5",
+  1575→    violet: "text-violet-600 dark:text-violet-400 border-violet-200 dark:border-violet-500/30 bg-violet-500/5",
+  1576→  };
+  1577→  return (
+  1578→    <Card className={cn("p-4 gap-3 border", accentMap[accent])}>
+  1579→      <div className="flex items-center gap-2">
+  1580→        <div className={cn("flex h-7 w-7 items-center justify-center rounded-md", accentMap[accent])}>
+  1581→          {icon}
+  1582→        </div>
+  1583→        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+  1584→          {label}
+  1585→        </span>
+  1586→      </div>
+  1587→      <div>
+  1588→        <p className="text-base font-bold truncate" title={title}>{title}</p>
+  1589→      </div>
+  1590→      {metrics.length > 0 ? (
+  1591→        <div className="grid grid-cols-2 gap-2 mt-1">
+  1592→          {metrics.map((m) => (
+  1593→            <div key={m.label} className="rounded-md bg-background/60 p-2">
+  1594→              <div className="text-[10px] uppercase text-muted-foreground">{m.label}</div>
+  1595→              <div className="text-sm font-semibold tabular-nums">{m.value}</div>
+  1596→            </div>
+  1597→          ))}
+  1598→        </div>
+  1599→      ) : (
+  1600→        <p className="text-xs text-muted-foreground">No published-pin data yet.</p>
+  1601→      )}
+  1602→    </Card>
+  1603→  );
+  1604→}
+  1605→
+  1606→function KpiPill({
+  1607→  icon,
+  1608→  label,
+  1609→  value,
+  1610→  accent,
+  1611→}: {
+  1612→  icon: React.ReactNode;
+  1613→  label: string;
+  1614→  value: string;
+  1615→  accent: "emerald" | "amber" | "rose" | "sky" | "violet";
+  1616→}) {
+  1617→  const accentMap: Record<string, string> = {
+  1618→    emerald: "text-emerald-600 dark:text-emerald-400",
+  1619→    amber: "text-amber-600 dark:text-amber-400",
+  1620→    rose: "text-rose-600 dark:text-rose-400",
+  1621→    sky: "text-sky-600 dark:text-sky-400",
+  1622→    violet: "text-violet-600 dark:text-violet-400",
+  1623→  };
+  1624→  return (
+  1625→    <div className="rounded-lg border p-3">
+  1626→      <div className={cn("flex items-center gap-1.5", accentMap[accent])}>
+  1627→        {icon}
+  1628→        <span className="text-[10px] font-medium uppercase">{label}</span>
+  1629→      </div>
+  1630→      <div className={cn("mt-1 text-xl font-bold tabular-nums", accentMap[accent])}>
+  1631→        {value}
+  1632→      </div>
+  1633→    </div>
+  1634→  );
+  1635→}
+  1636→
