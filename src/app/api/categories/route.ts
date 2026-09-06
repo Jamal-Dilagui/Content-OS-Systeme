@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getStore, genId } from "@/lib/store";
 
 export async function GET() {
-  const categories = await db.category.findMany({ orderBy: { orderIndex: "asc" }, include: { tasks: true } });
-  return NextResponse.json({ categories });
+  const store = getStore();
+  return NextResponse.json({ categories: store.categories });
 }
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const count = await db.category.count();
-  const cat = await db.category.create({
-    data: {
-      name: body.name,
-      dailyTarget: body.dailyTarget ?? 5,
-      color: body.color ?? "violet",
-      icon: body.icon ?? "FileText",
-      orderIndex: count,
-    },
-  });
+  const store = getStore();
+  const cat = {
+    id: genId("cat"),
+    name: body.name,
+    dailyTarget: body.dailyTarget ?? 5,
+    color: body.color ?? "violet",
+    icon: body.icon ?? "FileText",
+    orderIndex: store.categories.length,
+  };
+  store.categories.push(cat);
   return NextResponse.json(cat);
 }

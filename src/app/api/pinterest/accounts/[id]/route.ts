@@ -1,18 +1,22 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getStore } from "@/lib/store";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json();
-  const patch: Record<string, unknown> = {};
-  if (body.name !== undefined) patch.name = body.name;
-  if (body.pinsPerBatch !== undefined) patch.pinsPerBatch = body.pinsPerBatch;
-  const account = await db.pinterestAccount.update({ where: { id }, data: patch });
-  return NextResponse.json(account);
+  const store = getStore();
+  const acc = store.accounts.find((a) => a.id === id);
+  if (!acc) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (body.name !== undefined) acc.name = body.name;
+  if (body.pinsPerBatch !== undefined) acc.pinsPerBatch = body.pinsPerBatch;
+  return NextResponse.json(acc);
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await db.pinterestAccount.delete({ where: { id } });
+  const store = getStore();
+  const idx = store.accounts.findIndex((a) => a.id === id);
+  if (idx === -1) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  store.accounts.splice(idx, 1);
   return NextResponse.json({ ok: true });
 }
