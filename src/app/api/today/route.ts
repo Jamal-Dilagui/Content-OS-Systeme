@@ -10,17 +10,24 @@ export async function GET() {
   const today = startOfDay(now);
 
   // ---- Pinterest ----
-  const accounts = await db.pinterestAccount.findMany({ orderBy: { orderIndex: "asc" } });
-  // Account of the day = first not done this cycle
-  let accountOfDay = accounts.find((a) => !a.doneThisCycle) ?? null;
-  let cycleComplete = false;
-  // If all done, reset cycle
-  if (!accountOfDay && accounts.length > 0) {
-    cycleComplete = true;
-    await db.pinterestAccount.updateMany({ where: { doneThisCycle: true }, data: { doneThisCycle: false, cycle: { increment: 1 } } });
-    const refreshed = await db.pinterestAccount.findMany({ orderBy: { orderIndex: "asc" } });
-    accountOfDay = refreshed.find((a) => !a.doneThisCycle) ?? refreshed[0] ?? null;
+  let accounts = await db.pinterestAccount.findMany({ orderBy: { orderIndex: "asc" } });
+
+  // If ALL accounts are done this cycle → reset cycle (unlock all, bump cycle)
+  if (accounts.length > 0 && accounts.every((a) => a.doneThisCycle)) {
+    await db.pinterestAccount.updateMany({
+      where: { doneThisCycle: true },
+      data: { doneThisCycle: false, cycle: { increment: 1 }, pinsCompleted: 0 },
+    });
+    accounts = await db.pinterestAccount.findMany({ orderBy: { orderIndex: "asc" } });
   }
+
+  // Account of the day = first not-done account (default), unless user selected a specific one
+  // We store selectedAccountId on the first not-done account's record? No — use a separate approach:
+  // The "accountOfDay" is simply the first not-done account. User can pick any not-done account
+  // to work on via the UI (we track selection client-side + persist via a "selected" flag on the account).
+  // Simpler: the first not-done account marked as "selected" wins; otherwise first not-done.
+  let accountOfDay = accounts.find((a) => !a.doneThisCycle && a.selected) ?? accounts.find((a) => !a.doneThisCycle) ?? null;
+
   const accountsDone = accounts.filter((a) => a.doneThisCycle).length;
   const cycleNumber = accounts[0]?.cycle ?? 1;
 
@@ -38,16 +45,11 @@ export async function GET() {
 
   // ---- Streak ----
   let streak = await db.streak.findFirst();
-  if (!streak) {
-    streak = await db.streak.create({ data: {} });
-  }
-  // Check if last active was yesterday → maintain streak; if older, reset on first completion
-  const lastActive = streak.lastActiveDate ? startOfDay(new Date(streak.lastActiveDate)) : null;
-  const yesterday = startOfDay(new Date(now.getTime() - 86400000));
+  if (!streak) streak = await db.streak.create({ data: {} });
 
   // ---- 7-day history for chart ----
   const logs = await db.dailyLog.findMany({ where: { date: { gte: new Date(today.getTime() - 6 * 86400000) } } });
-  const history: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number; other: number }> = [];
+  const history: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }> = [];
   for (let d = 6; d >= 0; d--) {
     const day = startOfDay(new Date(now.getTime() - d * 86400000));
     const dayLogs = logs.filter((l) => startOfDay(new Date(l.date)).getTime() === day.getTime());
@@ -65,11 +67,10 @@ export async function GET() {
       pinterest: Math.round(pinterestPct),
       blog: byCat("Blog"),
       patterns: byCat("Patterns"),
-      other: 0,
     });
   }
 
-  // ---- Overall today's progress (for the big number) ----
+  // ---- Overall today's progress ----
   const pinterestPct = accountOfDay ? Math.min(100, (accountOfDay.pinsCompleted / accountOfDay.pinsPerBatch) * 100) : 0;
   const categoryPcts = categoryProgress.map((c) => c.pct);
   const overallPct = Math.round((pinterestPct + (categoryPcts.length > 0 ? categoryPcts.reduce((s, p) => s + p, 0) / categoryPcts.length : 0)) / (categoryPcts.length > 0 ? 2 : 1));
@@ -78,21 +79,20 @@ export async function GET() {
   const reminders: Array<{ text: string; severity: "info" | "warn" | "good" }> = [];
   if (accountOfDay) {
     const remaining = Math.max(0, accountOfDay.pinsPerBatch - accountOfDay.pinsCompleted);
-    if (remaining > 0) reminders.push({ text: `${accountOfDay.name}: ${remaining} pins left today`, severity: "warn" });
+    if (remaining > 0) reminders.push({ text: `${accountOfDay.name}: ${remaining} pins left`, severity: "warn" });
     else reminders.push({ text: `${accountOfDay.name} pins complete!`, severity: "good" });
   }
   for (const c of categoryProgress) {
     if (c.remaining > 0) reminders.push({ text: `${c.name}: ${c.remaining} task(s) left`, severity: "info" });
     else reminders.push({ text: `${c.name} target hit!`, severity: "good" });
   }
-  if (reminders.length === 0) reminders.push({ text: "All done for today!", severity: "good" });
+  if (reminders.length === 0) reminders.push({ text: "All done for today! 🎉", severity: "good" });
 
   // ---- Rewards ----
   const rewards: Array<{ icon: string; title: string; desc: string; unlocked: boolean }> = [
     { icon: "🔥", title: `${streak.currentStreak} Day Streak`, desc: "Come back tomorrow to extend", unlocked: streak.currentStreak > 0 },
     { icon: "🎯", title: "Pinterest Done", desc: "Finish today's account", unlocked: accountOfDay ? accountOfDay.pinsCompleted >= accountOfDay.pinsPerBatch : false },
     { icon: "🏆", title: "Perfect Day", desc: "Hit 100% in all categories", unlocked: overallPct >= 100 },
-    { icon: "⚡", title: "Cycle Master", desc: "Complete a full account cycle", unlocked: cycleComplete },
     { icon: "💎", title: `${streak.rewards} Perfect Days`, desc: "Total days at 100%", unlocked: streak.rewards > 0 },
   ];
 
@@ -103,7 +103,10 @@ export async function GET() {
       accountOfDay: accountOfDay
         ? { id: accountOfDay.id, name: accountOfDay.name, pinsPerBatch: accountOfDay.pinsPerBatch, pinsCompleted: accountOfDay.pinsCompleted, cycle: accountOfDay.cycle }
         : null,
-      accounts: accounts.map((a) => ({ id: a.id, name: a.name, done: a.doneThisCycle, cycle: a.cycle, orderIndex: a.orderIndex, pinsCompleted: a.pinsCompleted, pinsPerBatch: a.pinsPerBatch })),
+      accounts: accounts.map((a) => ({
+        id: a.id, name: a.name, done: a.doneThisCycle, selected: a.selected, cycle: a.cycle,
+        orderIndex: a.orderIndex, pinsCompleted: a.pinsCompleted, pinsPerBatch: a.pinsPerBatch,
+      })),
       accountsDone, totalAccounts: accounts.length, cycleNumber,
       pct: Math.round(pinterestPct),
     },

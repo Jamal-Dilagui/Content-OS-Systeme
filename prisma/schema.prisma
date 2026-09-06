@@ -17,6 +17,7 @@ model PinterestAccount {
   pinsPerBatch   Int      @default(30)
   pinsCompleted  Int      @default(0)
   doneThisCycle  Boolean  @default(false)
+  selected       Boolean  @default(false)
   cycle          Int      @default(1)
   lastWorkedDate DateTime?
   orderIndex     Int      @default(0)

@@ -17,11 +17,11 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import {
   CheckCircle2, Circle, Plus, Minus, Image as ImageIcon, Sparkles, Flame, Trophy,
-  Bell, Target, Plus as PlusIcon, Trash2, X, Check,
+  Bell, Target, Plus as PlusIcon, Trash2, X, Check, Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +30,7 @@ type Category = {
   id: string; name: string; dailyTarget: number; color: string; icon: string;
   doneCount: number; remaining: number; pct: number; tasks: Task[];
 };
-type Account = { id: string; name: string; done: boolean; cycle: number; orderIndex: number; pinsCompleted: number; pinsPerBatch: number };
+type Account = { id: string; name: string; done: boolean; selected: boolean; cycle: number; orderIndex: number; pinsCompleted: number; pinsPerBatch: number };
 type Reminder = { text: string; severity: "info" | "warn" | "good" };
 type Reward = { icon: string; title: string; desc: string; unlocked: boolean };
 type TodayData = {
@@ -42,7 +42,7 @@ type TodayData = {
   };
   categories: Category[];
   streak: { current: number; longest: number; rewards: number; totalDays: number };
-  history: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number; other: number }>;
+  history: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }>;
   overallPct: number;
   reminders: Reminder[];
   rewards: Reward[];
@@ -56,19 +56,22 @@ const COLOR_MAP: Record<string, { bg: string; text: string; bar: string; chip: s
   rose: { bg: "bg-rose-500/10", text: "text-rose-300", bar: "bg-rose-500", chip: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
   cyan: { bg: "bg-cyan-500/10", text: "text-cyan-300", bar: "bg-cyan-500", chip: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
 };
-const CHART_COLOR: Record<string, string> = { violet: "#8b5cf6", sky: "#0ea5e9", emerald: "#10b981", amber: "#f59e0b", rose: "#f43f5e", cyan: "#06b6d4" };
+const CHART_COLOR: Record<string, string> = { pinterest: "#8b5cf6", blog: "#0ea5e9", patterns: "#10b981" };
 const COLOR_OPTIONS = ["violet", "sky", "emerald", "amber", "rose", "cyan"];
 
 export default function Home() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery<TodayData>({
+  // Keep previous data during refetch to avoid the flash/skeleton on every action
+  const { data, isLoading, isFetching } = useQuery<TodayData>({
     queryKey: ["today"],
     queryFn: async () => {
       const res = await fetch("/api/today");
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
+    placeholderData: (prev) => prev,
+    staleTime: 5000,
   });
 
   const [addCatOpen, setAddCatOpen] = React.useState(false);
@@ -80,7 +83,13 @@ export default function Home() {
   });
   const doneAccount = useMutation({
     mutationFn: async (id: string) => fetch(`/api/pinterest/accounts/${id}/done`, { method: "POST" }).then((r) => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["today"] }); toast({ title: "Account done! 🎯", description: "Moving to the next account tomorrow." }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["today"] }); toast({ title: "Account done! 🎯", description: "Locked until the cycle completes." }); },
+    onError: () => toast({ title: "Error", variant: "destructive" }),
+  });
+  const selectAccount = useMutation({
+    mutationFn: async (id: string) => fetch(`/api/pinterest/accounts/${id}/select`, { method: "POST" }).then((r) => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["today"] }),
+    onError: () => toast({ title: "Can't select a done account", variant: "destructive" }),
   });
   const toggleTask = useMutation({
     mutationFn: async (id: string) => fetch(`/api/tasks/${id}/toggle`, { method: "POST" }).then((r) => r.json()),
@@ -121,7 +130,6 @@ export default function Home() {
               <p className="text-xs text-zinc-400">{data?.dateLabel ?? "Today"}</p>
             </div>
           </div>
-          {/* Streak + rewards summary */}
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">
               <Flame className="h-4 w-4 text-amber-400" />
@@ -136,7 +144,7 @@ export default function Home() {
           </div>
         </header>
 
-        {/* OVERALL PROGRESS BAR */}
+        {/* OVERALL PROGRESS */}
         <Card className="mb-6 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
@@ -158,20 +166,18 @@ export default function Home() {
           )}
         </Card>
 
-        {/* PINTEREST ACCOUNT OF THE DAY */}
+        {/* PINTEREST — ACCOUNT OF THE DAY + SELECTABLE ACCOUNTS */}
         <Card className="mb-6 border-zinc-800 bg-gradient-to-br from-violet-500/10 via-zinc-900/60 to-zinc-900/60 p-5 backdrop-blur">
           <div className="flex items-center gap-2 mb-3">
             <ImageIcon className="h-4 w-4 text-violet-400" />
-            <span className="text-xs font-bold uppercase tracking-wider text-violet-300">Pinterest · Account of the Day</span>
-            <Badge variant="outline" className="ml-auto border-zinc-700 text-zinc-400">Cycle {data?.pinterest.cycleNumber ?? 1}</Badge>
+            <span className="text-xs font-bold uppercase tracking-wider text-violet-300">Pinterest · Working On</span>
+            <Badge variant="outline" className="ml-auto border-zinc-700 text-zinc-400">Cycle {data?.pinterest.cycleNumber ?? 1} · {data?.pinterest.accountsDone ?? 0}/{data?.pinterest.totalAccounts ?? 0} done</Badge>
           </div>
           {isLoading ? <Skeleton className="h-20 bg-zinc-800" /> : data?.pinterest.accountOfDay ? (
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">{data.pinterest.accountOfDay.name}</h2>
-                <p className="text-sm text-zinc-400 mt-0.5">
-                  {data.pinterest.accountsDone} / {data.pinterest.totalAccounts} accounts done this cycle
-                </p>
+                <p className="text-sm text-zinc-400 mt-0.5">Click another available account below to switch</p>
               </div>
               <div className="flex flex-col gap-2 sm:w-72">
                 <div className="flex items-center justify-between text-sm">
@@ -193,7 +199,7 @@ export default function Home() {
                   disabled={doneAccount.isPending}
                   onClick={() => doneAccount.mutate(data.pinterest.accountOfDay!.id)}
                 >
-                  <CheckCircle2 className="h-4 w-4" /> Mark Done & Rotate
+                  <CheckCircle2 className="h-4 w-4" /> Mark Done (Lock Account)
                 </Button>
               </div>
             </div>
@@ -201,38 +207,82 @@ export default function Home() {
             <p className="text-zinc-400">No account available.</p>
           )}
 
-          {/* Account rotation strip */}
+          {/* SELECTABLE ACCOUNTS — click to switch (only not-done ones) */}
           {!isLoading && data && (
-            <div className="mt-4 flex flex-wrap gap-1.5">
-              {data.pinterest.accounts.map((a) => (
-                <span key={a.id} className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border", a.done ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : a.id === data.pinterest.accountOfDay?.id ? "border-violet-500/50 bg-violet-500/15 text-violet-200" : "border-zinc-700 bg-zinc-800/50 text-zinc-400")}>
-                  {a.done ? <Check className="h-3 w-3" /> : a.id === data.pinterest.accountOfDay?.id ? <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" /> : <Circle className="h-2.5 w-2.5" />}
-                  {a.name}
-                </span>
-              ))}
+            <div className="mt-4">
+              <p className="text-[10px] uppercase font-bold text-zinc-500 mb-2">Accounts — click to work on (locked ones are done)</p>
+              <div className="flex flex-wrap gap-1.5">
+                {data.pinterest.accounts.map((a) => {
+                  const isCurrent = a.id === data.pinterest.accountOfDay?.id;
+                  const isDone = a.done;
+                  return (
+                    <button
+                      key={a.id}
+                      disabled={isDone || isCurrent}
+                      onClick={() => selectAccount.mutate(a.id)}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-medium border transition-all",
+                        isDone
+                          ? "border-zinc-700 bg-zinc-800/30 text-zinc-500 cursor-not-allowed opacity-60"
+                          : isCurrent
+                            ? "border-violet-500/50 bg-violet-500/15 text-violet-200 cursor-default"
+                            : "border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-violet-200 cursor-pointer"
+                      )}
+                    >
+                      {isDone ? (
+                        <><Lock className="h-3 w-3" /> {a.name} ✓</>
+                      ) : isCurrent ? (
+                        <><span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" /> {a.name}</>
+                      ) : (
+                        <><Circle className="h-2.5 w-2.5" /> {a.name}</>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {data.pinterest.accountsDone === data.pinterest.totalAccounts && data.pinterest.totalAccounts > 0 && (
+                <p className="mt-3 text-xs text-emerald-400 font-medium">🎉 All accounts done! Cycle will reset and unlock all accounts.</p>
+              )}
             </div>
           )}
         </Card>
 
-        {/* 7-DAY PROGRESS CHART */}
+        {/* 7-DAY PROGRESS CHART — AREA (smooth, not bars) */}
         <Card className="mb-6 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
-          <div className="flex items-center gap-2 mb-3">
-            <BarChart className="h-4 w-4 text-violet-400" />
-            <span className="text-sm font-semibold">7-Day Progress (%)</span>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Target className="h-4 w-4 text-violet-400" />
+              <span className="text-sm font-semibold">7-Day Progress (%)</span>
+            </div>
+            {isFetching && !isLoading && <span className="text-[10px] text-zinc-500 animate-pulse">updating…</span>}
           </div>
           {isLoading ? <Skeleton className="h-56 bg-zinc-800" /> : (
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data!.history}>
+                <AreaChart data={data!.history}>
+                  <defs>
+                    <linearGradient id="gPin" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gBlog" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="gPat" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" unit="%" />
                   <Tooltip contentStyle={{ borderRadius: "0.5rem", border: "1px solid #3f3f46", background: "#18181b", color: "#f4f4f5", fontSize: "0.75rem" }} />
                   <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
-                  <Bar dataKey="pinterest" fill="#8b5cf6" name="Pinterest" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="blog" fill="#0ea5e9" name="Blog" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="patterns" fill="#10b981" name="Patterns" radius={[3, 3, 0, 0]} />
-                </BarChart>
+                  <Area type="monotone" dataKey="pinterest" stroke="#8b5cf6" strokeWidth={2} fill="url(#gPin)" name="Pinterest" />
+                  <Area type="monotone" dataKey="blog" stroke="#0ea5e9" strokeWidth={2} fill="url(#gBlog)" name="Blog" />
+                  <Area type="monotone" dataKey="patterns" stroke="#10b981" strokeWidth={2} fill="url(#gPat)" name="Patterns" />
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -265,7 +315,6 @@ export default function Home() {
 
         {/* REMINDERS + REWARDS */}
         <div className="grid gap-4 sm:grid-cols-2">
-          {/* Reminders */}
           <Card className="border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
             <div className="flex items-center gap-2 mb-3">
               <Bell className="h-4 w-4 text-sky-400" />
@@ -287,7 +336,6 @@ export default function Home() {
             )}
           </Card>
 
-          {/* Rewards */}
           <Card className="border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
             <div className="flex items-center gap-2 mb-3">
               <Trophy className="h-4 w-4 text-amber-400" />
@@ -311,13 +359,11 @@ export default function Home() {
           </Card>
         </div>
 
-        {/* FOOTER */}
         <footer className="mt-8 pb-4 text-center text-xs text-zinc-600">
           Content OS · Single-page process tracker · Stay consistent, ship every day
         </footer>
       </div>
 
-      {/* ADD CATEGORY DIALOG */}
       <AddCategoryDialog open={addCatOpen} onOpenChange={setAddCatOpen} onSubmit={(b) => addCategory.mutate(b)} />
     </div>
   );

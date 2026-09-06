@@ -10,7 +10,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const now = new Date();
   await db.pinterestAccount.update({
     where: { id },
-    data: { doneThisCycle: true, lastWorkedDate: now, pinsCompleted: account.pinsPerBatch },
+    data: { doneThisCycle: true, selected: false, lastWorkedDate: now, pinsCompleted: account.pinsPerBatch },
   });
 
   // Log today's pins
