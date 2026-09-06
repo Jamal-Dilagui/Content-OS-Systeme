@@ -76,34 +76,155 @@ export default function Home() {
 
   const [addCatOpen, setAddCatOpen] = React.useState(false);
 
+  // Helper: recompute overallPct from pinterest + categories
+  const recompute = (d: TodayData): TodayData => {
+    const pPct = d.pinterest.accountOfDay ? Math.min(100, (d.pinterest.accountOfDay.pinsCompleted / d.pinterest.accountOfDay.pinsPerBatch) * 100) : 0;
+    const cPcts = d.categories.map((c) => c.pct);
+    const overall = Math.round((pPct + (cPcts.length > 0 ? cPcts.reduce((s, p) => s + p, 0) / cPcts.length : 0)) / (cPcts.length > 0 ? 2 : 1));
+    return { ...d, overallPct: overall, pinterest: { ...d.pinterest, pct: Math.round(pPct) } };
+  };
+
+  // ---- Optimistic mutations: UI updates INSTANTLY, server syncs in background ----
   const addPin = useMutation({
     mutationFn: async ({ id, delta }: { id: string; delta: number }) =>
       fetch(`/api/pinterest/accounts/${id}/pins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta }) }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["today"] }),
+    onMutate: async ({ id, delta }) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      const prev = qc.getQueryData<TodayData>(["today"]);
+      if (prev) {
+        const next: TodayData = {
+          ...prev,
+          pinterest: {
+            ...prev.pinterest,
+            accountOfDay: prev.pinterest.accountOfDay && prev.pinterest.accountOfDay.id === id
+              ? { ...prev.pinterest.accountOfDay, pinsCompleted: Math.max(0, Math.min(prev.pinterest.accountOfDay.pinsPerBatch, prev.pinterest.accountOfDay.pinsCompleted + delta)) }
+              : prev.pinterest.accountOfDay,
+            accounts: prev.pinterest.accounts.map((a) => a.id === id ? { ...a, pinsCompleted: Math.max(0, Math.min(a.pinsPerBatch, a.pinsCompleted + delta)) } : a),
+          },
+        };
+        qc.setQueryData(["today"], recompute(next));
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
+
   const doneAccount = useMutation({
     mutationFn: async (id: string) => fetch(`/api/pinterest/accounts/${id}/done`, { method: "POST" }).then((r) => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["today"] }); toast({ title: "Account done! 🎯", description: "Locked until the cycle completes." }); },
-    onError: () => toast({ title: "Error", variant: "destructive" }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      const prev = qc.getQueryData<TodayData>(["today"]);
+      if (prev) {
+        const accounts = prev.pinterest.accounts.map((a) => a.id === id ? { ...a, done: true, selected: false, pinsCompleted: a.pinsPerBatch } : a);
+        // Next account of day = first not-done
+        const nextAcc = accounts.find((a) => !a.done) ?? null;
+        const next: TodayData = {
+          ...prev,
+          pinterest: {
+            ...prev.pinterest,
+            accounts,
+            accountsDone: accounts.filter((a) => a.done).length,
+            accountOfDay: nextAcc ? { id: nextAcc.id, name: nextAcc.name, pinsPerBatch: nextAcc.pinsPerBatch, pinsCompleted: nextAcc.pinsCompleted, cycle: nextAcc.cycle } : null,
+          },
+        };
+        qc.setQueryData(["today"], recompute(next));
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
+    onSuccess: () => toast({ title: "Account done! 🎯", description: "Locked until the cycle completes." }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
+
   const selectAccount = useMutation({
     mutationFn: async (id: string) => fetch(`/api/pinterest/accounts/${id}/select`, { method: "POST" }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["today"] }),
-    onError: () => toast({ title: "Can't select a done account", variant: "destructive" }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      const prev = qc.getQueryData<TodayData>(["today"]);
+      if (prev) {
+        const accounts = prev.pinterest.accounts.map((a) => ({ ...a, selected: a.id === id }));
+        const sel = accounts.find((a) => a.id === id);
+        const next: TodayData = {
+          ...prev,
+          pinterest: {
+            ...prev.pinterest,
+            accounts,
+            accountOfDay: sel ? { id: sel.id, name: sel.name, pinsPerBatch: sel.pinsPerBatch, pinsCompleted: sel.pinsCompleted, cycle: sel.cycle } : prev.pinterest.accountOfDay,
+          },
+        };
+        qc.setQueryData(["today"], recompute(next));
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); toast({ title: "Can't select a done account", variant: "destructive" }); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
+
   const toggleTask = useMutation({
     mutationFn: async (id: string) => fetch(`/api/tasks/${id}/toggle`, { method: "POST" }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["today"] }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      const prev = qc.getQueryData<TodayData>(["today"]);
+      if (prev) {
+        const categories = prev.categories.map((c) => {
+          const task = c.tasks.find((t) => t.id === id);
+          if (!task) return c;
+          const newDone = !task.done;
+          const tasks = c.tasks.map((t) => t.id === id ? { ...t, done: newDone } : t);
+          const doneCount = tasks.filter((t) => t.done).length;
+          const pct = c.dailyTarget > 0 ? Math.min(100, Math.round((doneCount / c.dailyTarget) * 100)) : 0;
+          return { ...c, tasks, doneCount, remaining: Math.max(0, c.dailyTarget - doneCount), pct };
+        });
+        qc.setQueryData(["today"], recompute({ ...prev, categories }));
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
+
   const addTask = useMutation({
     mutationFn: async ({ categoryId, title }: { categoryId: string; title: string }) =>
       fetch(`/api/tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId, title }) }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["today"] }),
+    onMutate: async ({ categoryId, title }) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      const prev = qc.getQueryData<TodayData>(["today"]);
+      if (prev) {
+        const categories = prev.categories.map((c) => {
+          if (c.id !== categoryId) return c;
+          const tasks = [...c.tasks, { id: `temp-${Date.now()}`, title, done: false }];
+          return { ...c, tasks };
+        });
+        qc.setQueryData(["today"], { ...prev, categories });
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
+
   const deleteTask = useMutation({
     mutationFn: async (id: string) => fetch(`/api/tasks?id=${id}`, { method: "DELETE" }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["today"] }),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      const prev = qc.getQueryData<TodayData>(["today"]);
+      if (prev) {
+        const categories = prev.categories.map((c) => {
+          const tasks = c.tasks.filter((t) => t.id !== id);
+          if (tasks.length === c.tasks.length) return c;
+          const doneCount = tasks.filter((t) => t.done).length;
+          const pct = c.dailyTarget > 0 ? Math.min(100, Math.round((doneCount / c.dailyTarget) * 100)) : 0;
+          return { ...c, tasks, doneCount, remaining: Math.max(0, c.dailyTarget - doneCount), pct };
+        });
+        qc.setQueryData(["today"], recompute({ ...prev, categories }));
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
+
   const addCategory = useMutation({
     mutationFn: async (body: Record<string, unknown>) =>
       fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
@@ -111,8 +232,36 @@ export default function Home() {
   });
   const deleteCategory = useMutation({
     mutationFn: async (id: string) => fetch(`/api/categories/${id}`, { method: "DELETE" }).then((r) => r.json()),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["today"] }); toast({ title: "Category removed" }); },
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      const prev = qc.getQueryData<TodayData>(["today"]);
+      if (prev) qc.setQueryData(["today"], { ...prev, categories: prev.categories.filter((c) => c.id !== id) });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(["today"], ctx.prev); },
+    onSuccess: () => toast({ title: "Category removed" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["today"] }),
   });
+
+  // Pre-warm all API routes on mount so the first action doesn't trigger compilation
+  React.useEffect(() => {
+    const warm = async () => {
+      // Hit GET routes to trigger compilation in the background
+      await Promise.allSettled([
+        fetch("/api/today"),
+        fetch("/api/categories"),
+      ]);
+      // Warm the dynamic mutation routes with a dummy id (will 404 but compiles the route)
+      await Promise.allSettled([
+        fetch("/api/pinterest/accounts/warm/pins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta: 0 }) }).catch(() => {}),
+        fetch("/api/pinterest/accounts/warm/done", { method: "POST" }).catch(() => {}),
+        fetch("/api/pinterest/accounts/warm/select", { method: "POST" }).catch(() => {}),
+        fetch("/api/tasks/warm/toggle", { method: "POST" }).catch(() => {}),
+        fetch("/api/tasks?warm=1", { method: "DELETE" }).catch(() => {}),
+      ]);
+    };
+    warm();
+  }, []);
 
   const overallPct = data?.overallPct ?? 0;
 
