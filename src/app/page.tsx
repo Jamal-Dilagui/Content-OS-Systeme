@@ -426,22 +426,48 @@ export default function Home() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">{data.pinterest.accountOfDay.name}</h2>
-                <p className="text-sm text-zinc-400 mt-0.5">Click another available account below to switch</p>
+                <p className="text-sm text-zinc-400 mt-0.5">Tap the number to add a pin · tap − to undo</p>
               </div>
               <div className="flex flex-col gap-2 sm:w-72">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-zinc-400">Pins today</span>
-                  <span className="font-bold text-lg tabular-nums">{data.pinterest.accountOfDay.pinsCompleted} / {data.pinterest.accountOfDay.pinsPerBatch}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" className="h-8 w-8 p-0 border-zinc-700 bg-zinc-800 hover:bg-zinc-700" onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: -1 })}>
-                    <Minus className="h-3.5 w-3.5" />
-                  </Button>
-                  <Progress value={data.pinterest.pct} className="h-2.5 flex-1" />
-                  <Button size="sm" variant="outline" className="h-8 w-8 p-0 border-zinc-700 bg-zinc-800 hover:bg-zinc-700" onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 1 })}>
-                    <Plus className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+                {/* Big clickable counter — tap to add a pin */}
+                <button
+                  onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 1 })}
+                  disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch}
+                  className="group flex items-center gap-3 rounded-xl border border-zinc-700 bg-zinc-800/60 p-3 hover:border-violet-500/50 hover:bg-violet-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex flex-col items-center">
+                    <span className="text-3xl font-bold tabular-nums text-violet-300 group-hover:scale-110 transition-transform">
+                      {data.pinterest.accountOfDay.pinsCompleted}
+                    </span>
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wide">/ {data.pinterest.accountOfDay.pinsPerBatch} pins</span>
+                  </div>
+                  <div className="flex-1 flex flex-col gap-1.5">
+                    <Progress value={data.pinterest.pct} className="h-2.5" />
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-zinc-500">{data.pinterest.pct}% done</span>
+                      {data.pinterest.accountOfDay.pinsCompleted < data.pinterest.accountOfDay.pinsPerBatch ? (
+                        <span className="text-[11px] text-violet-300 font-medium flex items-center gap-0.5">
+                          <Plus className="h-3 w-3" /> tap
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-emerald-400 font-medium">complete! ✓</span>
+                      )}
+                    </div>
+                  </div>
+                  {/* Undo button — small, only if pins > 0 */}
+                  {data.pinterest.accountOfDay.pinsCompleted > 0 && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => { e.stopPropagation(); addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: -1 }); }}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: -1 }); } }}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                      title="Undo last pin"
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                </button>
                 <Button
                   size="sm"
                   className="mt-1 bg-violet-600 hover:bg-violet-500 text-white"
