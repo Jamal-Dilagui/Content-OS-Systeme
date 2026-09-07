@@ -393,8 +393,8 @@ export default function Home() {
           categories: [],
           streak: { current: 0, longest: 0, rewards: 0, totalDays: 0 },
           overallPct: 0,
-          history: prev.history.map((h, i) => i === prev.history.length - 1 ? { ...h, pinterest: 0, blog: 0, patterns: 0 } : h),
-          monthlyHistory: prev.monthlyHistory.map((h, i) => i === prev.monthlyHistory.length - 1 ? { ...h, pinterest: 0, blog: 0, patterns: 0 } : h),
+          history: prev.history.map((h) => ({ ...h, pinterest: 0, blog: 0, patterns: 0 })),
+          monthlyHistory: prev.monthlyHistory.map((h) => ({ ...h, pinterest: 0, blog: 0, patterns: 0 })),
           reminders: [{ text: "Fresh start! Add categories and tasks to begin. 🎉", severity: "good" }],
           rewards: prev.rewards.map((r) => ({ ...r, unlocked: false })),
         };
