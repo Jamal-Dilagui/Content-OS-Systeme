@@ -110,13 +110,21 @@ export default function Home() {
     const cPcts = d.categories.map((c) => c.pct);
     const overall = Math.round((pPct + (cPcts.length > 0 ? cPcts.reduce((s, p) => s + p, 0) / cPcts.length : 0)) / (cPcts.length > 0 ? 2 : 1));
     // Update today's history point so the chart updates live with actions
-    const history = d.history.map((h, i) => {
-      if (i !== d.history.length - 1) return h; // only update today (last point)
-      const blog = d.categories.find((c) => c.name.toLowerCase() === "blog")?.pct ?? h.blog;
-      const patterns = d.categories.find((c) => c.name.toLowerCase() === "patterns")?.pct ?? h.patterns;
-      return { ...h, pinterest: Math.round(pPct), blog, patterns };
+    // Map categories to chart lines: blog, patterns (existing) + generic fallback
+    const blogPct = d.categories.find((c) => c.name.toLowerCase() === "blog")?.pct ?? d.history[d.history.length-1]?.blog ?? 0;
+    const patternsPct = d.categories.find((c) => c.name.toLowerCase() === "patterns")?.pct ?? d.history[d.history.length-1]?.patterns ?? 0;
+    const pinPct = Math.round(pPct);
+    const updateToday = (arr: typeof d.history) => arr.map((h, i) => {
+      if (i !== arr.length - 1) return h; // only update today (last point)
+      return { ...h, pinterest: pinPct, blog: blogPct, patterns: patternsPct };
     });
-    return { ...d, overallPct: overall, pinterest: { ...d.pinterest, pct: Math.round(pPct) }, history };
+    return {
+      ...d,
+      overallPct: overall,
+      pinterest: { ...d.pinterest, pct: pinPct },
+      history: updateToday(d.history),
+      monthlyHistory: updateToday(d.monthlyHistory),
+    };
   };
 
   // ---- Optimistic mutations: UI updates INSTANTLY, NO background refetch (no flash) ----
