@@ -35,7 +35,7 @@ export async function GET() {
     };
   });
 
-  // 7-day history
+  // 7-day history (weekly view)
   const history: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }> = [];
   for (let d = 6; d >= 0; d--) {
     const day = startOfDay(new Date(now.getTime() - d * 86400000));
@@ -50,6 +50,28 @@ export async function GET() {
     };
     history.push({
       label: day.toLocaleDateString("en-US", { weekday: "short" }),
+      date: day.toISOString(),
+      pinterest: pinterestPct,
+      blog: byCat("Blog"),
+      patterns: byCat("Patterns"),
+    });
+  }
+
+  // 30-day history (monthly view) — aggregate per day
+  const monthlyHistory: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }> = [];
+  for (let d = 29; d >= 0; d--) {
+    const day = startOfDay(new Date(now.getTime() - d * 86400000));
+    const dayLogs = store.logs.filter((l) => startOfDay(new Date(l.date)).getTime() === day.getTime());
+    const pinterestPct = Math.min(100, Math.round(((dayLogs.find((l) => l.categoryId === null)?.pinsCompleted ?? 0) / 30) * 100));
+    const byCat = (catName: string) => {
+      const cat = store.categories.find((c) => c.name === catName);
+      if (!cat) return 0;
+      const log = dayLogs.find((l) => l.categoryId === cat.id);
+      if (!log || cat.dailyTarget === 0) return 0;
+      return Math.min(100, Math.round((log.tasksCompleted / cat.dailyTarget) * 100));
+    };
+    monthlyHistory.push({
+      label: day.toLocaleDateString("en-US", { day: "numeric" }),
       date: day.toISOString(),
       pinterest: pinterestPct,
       blog: byCat("Blog"),
@@ -99,6 +121,7 @@ export async function GET() {
     categories,
     streak: { current: store.streak.currentStreak, longest: store.streak.longestStreak, rewards: store.streak.rewards, totalDays: store.streak.totalDays },
     history,
+    monthlyHistory,
     overallPct,
     reminders,
     rewards,

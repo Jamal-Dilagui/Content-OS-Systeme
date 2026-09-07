@@ -103,14 +103,21 @@ function seed(): Store {
   ];
 
   const logs: DailyLog[] = [];
-  for (let d = 6; d >= 0; d--) {
+  // Generate 30 days of history (today fresh, past days with varied data for chart)
+  for (let d = 29; d >= 0; d--) {
     const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - d);
     const dayISO = day.toISOString();
-    // Today (d=0) is fresh — 0 everything. Past days have data for chart history.
     const isToday = d === 0;
-    logs.push({ id: `log-pin-${d}`, date: dayISO, categoryId: null, pinsCompleted: isToday ? 0 : 30, tasksCompleted: 0 });
-    logs.push({ id: `log-blog-${d}`, date: dayISO, categoryId: "cat-blog", pinsCompleted: 0, tasksCompleted: isToday ? 0 : 5 });
-    logs.push({ id: `log-pat-${d}`, date: dayISO, categoryId: "cat-patterns", pinsCompleted: 0, tasksCompleted: isToday ? 0 : 3 });
+    // Past days: realistic varied data (some 100%, some partial, weekends lower)
+    const dayOfWeek = day.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const variation = isToday ? 0 : isWeekend ? (0.6 + Math.random() * 0.3) : (0.8 + Math.random() * 0.2);
+    const pins = isToday ? 0 : Math.round(30 * variation);
+    const blogTasks = isToday ? 0 : Math.round(5 * variation);
+    const patTasks = isToday ? 0 : Math.round(3 * variation);
+    logs.push({ id: `log-pin-${d}`, date: dayISO, categoryId: null, pinsCompleted: pins, tasksCompleted: 0 });
+    logs.push({ id: `log-blog-${d}`, date: dayISO, categoryId: "cat-blog", pinsCompleted: 0, tasksCompleted: blogTasks });
+    logs.push({ id: `log-pat-${d}`, date: dayISO, categoryId: "cat-patterns", pinsCompleted: 0, tasksCompleted: patTasks });
   }
 
   return {

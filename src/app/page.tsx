@@ -21,7 +21,7 @@ import {
 } from "recharts";
 import {
   CheckCircle2, Circle, Plus, Minus, Image as ImageIcon, Sparkles, Flame, Trophy,
-  Bell, Target, Plus as PlusIcon, Trash2, X, Check, Lock, Settings, Pencil,
+  Bell, Target, Plus as PlusIcon, Trash2, X, Check, Lock, Settings, Pencil, RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +43,7 @@ type TodayData = {
   categories: Category[];
   streak: { current: number; longest: number; rewards: number; totalDays: number };
   history: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }>;
+  monthlyHistory: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }>;
   overallPct: number;
   reminders: Reminder[];
   rewards: Reward[];
@@ -66,7 +67,7 @@ export default function Home() {
   // Always fetch fresh from server. localStorage is only a placeholder to avoid white screen
   // while the request is in-flight. We bump the CACHE_VERSION whenever the seed data changes
   // so old localStorage is automatically discarded.
-  const CACHE_VERSION = "v2-fr";
+  const CACHE_VERSION = "v3-unlock-monthly";
   const STORAGE_KEY = `content-os-today-${CACHE_VERSION}`;
 
   const { data, isLoading } = useQuery<TodayData>({
@@ -93,6 +94,7 @@ export default function Home() {
 
   const [addCatOpen, setAddCatOpen] = React.useState(false);
   const [manageAccOpen, setManageAccOpen] = React.useState(false);
+  const [chartView, setChartView] = React.useState<"weekly" | "monthly">("weekly");
 
   // Helper: recompute overallPct + persist to localStorage
   const updateData = (updater: (prev: TodayData) => TodayData) => {
@@ -339,6 +341,32 @@ export default function Home() {
     },
   });
 
+  const unlockAccount = useMutation({
+    mutationFn: async (id: string) => fetch(`/api/pinterest/accounts/${id}/unlock`, { method: "POST" }).then((r) => r.json()),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      updateData((prev) => {
+        const accounts = prev.pinterest.accounts.map((a) => a.id === id ? { ...a, done: false, selected: false, pinsCompleted: 0 } : a);
+        return recompute({
+          ...prev,
+          pinterest: { ...prev.pinterest, accounts, accountsDone: accounts.filter((a) => a.done).length, accountOfDay: prev.pinterest.accountOfDay },
+        });
+      });
+      toast({ title: "Account unlocked! 🔓" });
+      return {};
+    },
+  });
+
+  const resetData = useMutation({
+    mutationFn: async () => fetch(`/api/reset`, { method: "POST" }).then((r) => r.json()),
+    onSuccess: async () => {
+      // Force fresh fetch from server
+      await qc.invalidateQueries({ queryKey: ["today"] });
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      window.location.reload();
+    },
+  });
+
   // Pre-warm all API routes on mount so the first action doesn't trigger compilation
   React.useEffect(() => {
     const warm = async () => {
@@ -387,6 +415,16 @@ export default function Home() {
               <span className="text-sm font-bold text-violet-300">{data?.streak.rewards ?? 0}</span>
               <span className="text-xs text-violet-300/70">perfect days</span>
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs"
+              disabled={resetData.isPending}
+              onClick={() => { if (confirm("Reset all data to fresh start? This will clear your current progress.")) resetData.mutate(); }}
+              title="Reset all data to initial state"
+            >
+              <RotateCcw className="h-3 w-3" /> Reset
+            </Button>
           </div>
         </header>
 
@@ -482,31 +520,42 @@ export default function Home() {
             <p className="text-zinc-400">No account available.</p>
           )}
 
-          {/* SELECTABLE ACCOUNTS — click to switch (only not-done ones) */}
+          {/* SELECTABLE ACCOUNTS — click to switch (only not-done ones) + unlock done ones */}
           {!isLoading && data && (
             <div className="mt-4">
-              <p className="text-[10px] uppercase font-bold text-zinc-500 mb-2">Accounts — click to work on (locked ones are done)</p>
+              <p className="text-[10px] uppercase font-bold text-zinc-500 mb-2">Accounts — click to work on · click 🔓 to unlock a locked one</p>
               <div className="flex flex-wrap gap-1.5">
                 {data.pinterest.accounts.map((a) => {
                   const isCurrent = a.id === data.pinterest.accountOfDay?.id;
                   const isDone = a.done;
+                  if (isDone) {
+                    // Locked account — show with unlock button
+                    return (
+                      <div key={a.id} className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800/30 px-2.5 py-1.5 text-[11px] font-medium text-zinc-500">
+                        <Lock className="h-3 w-3" /> {a.name} ✓
+                        <button
+                          onClick={() => unlockAccount.mutate(a.id)}
+                          title="Unlock this account"
+                          className="ml-1 flex h-4 w-4 items-center justify-center rounded-full text-zinc-500 hover:text-violet-300 hover:bg-violet-500/20 transition-colors"
+                        >
+                          🔓
+                        </button>
+                      </div>
+                    );
+                  }
                   return (
                     <button
                       key={a.id}
-                      disabled={isDone || isCurrent}
+                      disabled={isCurrent}
                       onClick={() => selectAccount.mutate(a.id)}
                       className={cn(
                         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-medium border transition-all",
-                        isDone
-                          ? "border-zinc-700 bg-zinc-800/30 text-zinc-500 cursor-not-allowed opacity-60"
-                          : isCurrent
-                            ? "border-violet-500/50 bg-violet-500/15 text-violet-200 cursor-default"
-                            : "border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-violet-200 cursor-pointer"
+                        isCurrent
+                          ? "border-violet-500/50 bg-violet-500/15 text-violet-200 cursor-default"
+                          : "border-zinc-700 bg-zinc-800/50 text-zinc-300 hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-violet-200 cursor-pointer"
                       )}
                     >
-                      {isDone ? (
-                        <><Lock className="h-3 w-3" /> {a.name} ✓</>
-                      ) : isCurrent ? (
+                      {isCurrent ? (
                         <><span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" /> {a.name}</>
                       ) : (
                         <><Circle className="h-2.5 w-2.5" /> {a.name}</>
@@ -522,19 +571,34 @@ export default function Home() {
           )}
         </Card>
 
-        {/* 7-DAY PROGRESS CHART — AREA (smooth, not bars) */}
+        {/* PROGRESS CHART — AREA (weekly/monthly toggle) */}
         <Card className="mb-6 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Target className="h-4 w-4 text-violet-400" />
-              <span className="text-sm font-semibold">7-Day Progress (%)</span>
+              <span className="text-sm font-semibold">Progress (%)</span>
             </div>
-            {isLoading && <span className="text-[10px] text-zinc-500 animate-pulse">loading…</span>}
+            {!isLoading && data && (
+              <div className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800/50 p-0.5">
+                <button
+                  onClick={() => setChartView("weekly")}
+                  className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "weekly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}
+                >
+                  Weekly
+                </button>
+                <button
+                  onClick={() => setChartView("monthly")}
+                  className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "monthly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}
+                >
+                  Monthly
+                </button>
+              </div>
+            )}
           </div>
           {isLoading || !data ? <Skeleton className="h-56 bg-zinc-800" /> : (
             <div className="h-56" style={{ minHeight: 224 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data.history} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                <AreaChart data={chartView === "weekly" ? data.history : data.monthlyHistory} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                   <defs>
                     <linearGradient id="gPin" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
@@ -550,7 +614,7 @@ export default function Home() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" interval={chartView === "monthly" ? 2 : 0} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" unit="%" />
                   <Tooltip contentStyle={{ borderRadius: "0.5rem", border: "1px solid #3f3f46", background: "#18181b", color: "#f4f4f5", fontSize: "0.75rem" }} />
                   <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
