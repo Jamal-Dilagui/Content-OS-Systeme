@@ -64,11 +64,18 @@ export default function Home() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  // Always fetch fresh from server. localStorage is only a placeholder to avoid white screen
-  // while the request is in-flight. We bump the CACHE_VERSION whenever the seed data changes
-  // so old localStorage is automatically discarded.
-  const CACHE_VERSION = "v3-unlock-monthly";
+  // localStorage is the SOLE source of truth (Vercel serverless is stateless —
+  // in-memory store resets on every cold start, so we can't rely on server).
+  // Server is ONLY used for the very first visit (seed data). After that, all
+  // reads come from localStorage, all writes go to localStorage.
+  const CACHE_VERSION = "v4-persistent";
   const STORAGE_KEY = `content-os-today-${CACHE_VERSION}`;
+
+  // Check localStorage ONCE on mount — if we have data, never fetch from server
+  const [hasCachedData] = React.useState(() => {
+    if (typeof window === "undefined") return false;
+    try { return !!localStorage.getItem(STORAGE_KEY); } catch { return false; }
+  });
 
   const { data, isLoading } = useQuery<TodayData>({
     queryKey: ["today"],
@@ -86,10 +93,12 @@ export default function Home() {
         return cached ? JSON.parse(cached) : undefined;
       } catch { return undefined; }
     },
-    // Always fetch from server on mount to get fresh data, but keep cached data visible meanwhile
-    staleTime: 0,
+    // Only fetch from server on the VERY FIRST visit (no localStorage yet).
+    // After that, localStorage is the source of truth — never refetch.
+    enabled: !hasCachedData,
+    staleTime: Infinity,
+    refetchOnMount: false,
     refetchOnWindowFocus: false,
-    refetchOnMount: true,
   });
 
   const [addCatOpen, setAddCatOpen] = React.useState(false);
