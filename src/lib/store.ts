@@ -62,15 +62,23 @@ const globalStore = globalThis as unknown as { __contentOSStore?: Store };
 
 function seed(): Store {
   const now = new Date();
-  const accounts: PinterestAccount[] = [
-    "Crochet Daily Pins", "Cozy Crochet Co", "Home Decor Inspo", "Organize With Me",
-    "Planner Paradise", "Craft Corner Pins", "Yarn & Hooks", "Modern Home Pins",
-    "Printable Studio", "Creative Crafts HQ",
-  ].map((name, i) => ({
+  const accountNames = [
+    "Bébé Crochet Doux",
+    "Bébé crochet magic",
+    "Doudou crochet",
+    "Panda au crochet tuto",
+    "Accessoires au crochet",
+    "Accessoires au crochet facile",
+    "Bébé Crochet Doux 2",
+    "Chaussons bébé au crochet",
+    "Sac crochet facile débutant",
+    "Sax au crochet tuto",
+  ];
+  const accounts: PinterestAccount[] = accountNames.map((name, i) => ({
     id: `acc-${i}`,
     name,
     pinsPerBatch: 30,
-    pinsCompleted: i === 0 ? 12 : 0,
+    pinsCompleted: 0,
     doneThisCycle: false,
     selected: i === 0,
     cycle: 1,
@@ -84,23 +92,25 @@ function seed(): Store {
   ];
 
   const tasks: Task[] = [
-    { id: "t1", categoryId: "cat-blog", title: "Write article: 10 Easy Crochet Stitches", done: true, completedAt: now.toISOString() },
-    { id: "t2", categoryId: "cat-blog", title: "SEO optimize article: Granny Square Guide", done: true, completedAt: now.toISOString() },
-    { id: "t3", categoryId: "cat-blog", title: "Write article: Beginner Crochet Tips", done: true, completedAt: now.toISOString() },
-    { id: "t4", categoryId: "cat-blog", title: "Add internal links to winter patterns post", done: false, completedAt: null },
-    { id: "t5", categoryId: "cat-blog", title: "Write article: Best Yarn for Amigurumi", done: false, completedAt: null },
-    { id: "t6", categoryId: "cat-patterns", title: "Design new pattern: Boho Coaster Set", done: true, completedAt: now.toISOString() },
-    { id: "t7", categoryId: "cat-patterns", title: "Create PDF for Amigurumi Bunny", done: true, completedAt: now.toISOString() },
-    { id: "t8", categoryId: "cat-patterns", title: "Photo shoot: Granny Square Pattern", done: false, completedAt: null },
+    { id: "t1", categoryId: "cat-blog", title: "Écrire article: 10 points faciles au crochet", done: false, completedAt: null },
+    { id: "t2", categoryId: "cat-blog", title: "SEO optimiser article: Guide granny square", done: false, completedAt: null },
+    { id: "t3", categoryId: "cat-blog", title: "Écrire article: Astuces débutant crochet", done: false, completedAt: null },
+    { id: "t4", categoryId: "cat-blog", title: "Ajouter liens internes: modèles d'hiver", done: false, completedAt: null },
+    { id: "t5", categoryId: "cat-blog", title: "Écrire article: Meilleur fil pour amigurumi", done: false, completedAt: null },
+    { id: "t6", categoryId: "cat-patterns", title: "Créer modèle: Set de sous-plats bohème", done: false, completedAt: null },
+    { id: "t7", categoryId: "cat-patterns", title: "Créer PDF: Lapin amigurumi", done: false, completedAt: null },
+    { id: "t8", categoryId: "cat-patterns", title: "Photo shoot: Modèle granny square", done: false, completedAt: null },
   ];
 
   const logs: DailyLog[] = [];
   for (let d = 6; d >= 0; d--) {
     const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - d);
     const dayISO = day.toISOString();
-    logs.push({ id: `log-pin-${d}`, date: dayISO, categoryId: null, pinsCompleted: d === 0 ? 12 : 30, tasksCompleted: 0 });
-    logs.push({ id: `log-blog-${d}`, date: dayISO, categoryId: "cat-blog", pinsCompleted: 0, tasksCompleted: d === 0 ? 3 : 5 });
-    logs.push({ id: `log-pat-${d}`, date: dayISO, categoryId: "cat-patterns", pinsCompleted: 0, tasksCompleted: d === 0 ? 2 : 3 });
+    // Today (d=0) is fresh — 0 everything. Past days have data for chart history.
+    const isToday = d === 0;
+    logs.push({ id: `log-pin-${d}`, date: dayISO, categoryId: null, pinsCompleted: isToday ? 0 : 30, tasksCompleted: 0 });
+    logs.push({ id: `log-blog-${d}`, date: dayISO, categoryId: "cat-blog", pinsCompleted: 0, tasksCompleted: isToday ? 0 : 5 });
+    logs.push({ id: `log-pat-${d}`, date: dayISO, categoryId: "cat-patterns", pinsCompleted: 0, tasksCompleted: isToday ? 0 : 3 });
   }
 
   return {
@@ -108,7 +118,7 @@ function seed(): Store {
     categories,
     tasks,
     logs,
-    streak: { id: "streak-1", currentStreak: 4, longestStreak: 7, lastActiveDate: now.toISOString(), totalDays: 12, rewards: 3 },
+    streak: { id: "streak-1", currentStreak: 0, longestStreak: 0, lastActiveDate: null, totalDays: 0, rewards: 0 },
     initialized: true,
   };
 }
