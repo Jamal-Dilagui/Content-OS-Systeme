@@ -62,16 +62,19 @@ const COLOR_OPTIONS = ["violet", "sky", "emerald", "amber", "rose", "cyan"];
 export default function Home() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const STORAGE_KEY = "content-os-today";
 
-  // Load from localStorage as initial data → instant render on refresh, no white screen
+  // Always fetch fresh from server. localStorage is only a placeholder to avoid white screen
+  // while the request is in-flight. We bump the CACHE_VERSION whenever the seed data changes
+  // so old localStorage is automatically discarded.
+  const CACHE_VERSION = "v2-fr";
+  const STORAGE_KEY = `content-os-today-${CACHE_VERSION}`;
+
   const { data, isLoading } = useQuery<TodayData>({
     queryKey: ["today"],
     queryFn: async () => {
       const res = await fetch("/api/today");
       if (!res.ok) throw new Error("Failed");
       const json = await res.json();
-      // Persist to localStorage
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(json)); } catch {}
       return json;
     },
@@ -82,9 +85,10 @@ export default function Home() {
         return cached ? JSON.parse(cached) : undefined;
       } catch { return undefined; }
     },
-    staleTime: Infinity, // never auto-refetch — we control updates via optimistic mutations
+    // Always fetch from server on mount to get fresh data, but keep cached data visible meanwhile
+    staleTime: 0,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    refetchOnMount: true,
   });
 
   const [addCatOpen, setAddCatOpen] = React.useState(false);
