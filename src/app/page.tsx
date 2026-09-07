@@ -359,11 +359,33 @@ export default function Home() {
 
   const resetData = useMutation({
     mutationFn: async () => fetch(`/api/reset`, { method: "POST" }).then((r) => r.json()),
-    onSuccess: async () => {
-      // Force fresh fetch from server
-      await qc.invalidateQueries({ queryKey: ["today"] });
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
-      window.location.reload();
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      const prev = qc.getQueryData<TodayData>(["today"]);
+      // Optimistically wipe to blank state
+      if (prev) {
+        const blank: TodayData = {
+          ...prev,
+          pinterest: {
+            ...prev.pinterest,
+            accounts: prev.pinterest.accounts.map((a) => ({ ...a, done: false, selected: false, pinsCompleted: 0, cycle: 1 })),
+            accountsDone: 0,
+            accountOfDay: prev.pinterest.accounts[0] ? { id: prev.pinterest.accounts[0].id, name: prev.pinterest.accounts[0].name, pinsPerBatch: prev.pinterest.accounts[0].pinsPerBatch, pinsCompleted: 0, cycle: 1 } : null,
+            pct: 0,
+          },
+          categories: [],
+          streak: { current: 0, longest: 0, rewards: 0, totalDays: 0 },
+          overallPct: 0,
+          history: prev.history.map((h, i) => i === prev.history.length - 1 ? { ...h, pinterest: 0, blog: 0, patterns: 0 } : h),
+          monthlyHistory: prev.monthlyHistory.map((h, i) => i === prev.monthlyHistory.length - 1 ? { ...h, pinterest: 0, blog: 0, patterns: 0 } : h),
+          reminders: [{ text: "Fresh start! Add categories and tasks to begin. 🎉", severity: "good" }],
+          rewards: prev.rewards.map((r) => ({ ...r, unlocked: false })),
+        };
+        qc.setQueryData(["today"], blank);
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(blank)); } catch {}
+      }
+      toast({ title: "Data reset to blank slate!" });
+      return {};
     },
   });
 
