@@ -264,14 +264,14 @@ export default function Home() {
         doneCount: 0, remaining: (body.dailyTarget as number) || 5, pct: 0, tasks: [],
       };
       await qc.cancelQueries({ queryKey: ["today"] });
-      updateData((prev) => ({ ...prev, categories: [...prev.categories, tempCat] }));
+      updateData((prev) => recompute({ ...prev, categories: [...prev.categories, tempCat] }));
       toast({ title: "Category added!" });
       setAddCatOpen(false);
       return { tempId };
     },
     onSuccess: (created: Category, _v, ctx) => {
       if (!ctx?.tempId) return;
-      updateData((prev) => ({
+      updateData((prev) => recompute({
         ...prev,
         categories: prev.categories.map((c) => c.id === ctx.tempId ? { ...created, tasks: [] } : c),
       }));
@@ -282,7 +282,7 @@ export default function Home() {
     mutationFn: async (id: string) => fetch(`/api/categories/${id}`, { method: "DELETE" }).then((r) => r.json()),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["today"] });
-      updateData((prev) => ({ ...prev, categories: prev.categories.filter((c) => c.id !== id) }));
+      updateData((prev) => recompute({ ...prev, categories: prev.categories.filter((c) => c.id !== id) }));
       toast({ title: "Category removed" });
       return {};
     },
@@ -494,7 +494,7 @@ export default function Home() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">{data.pinterest.accountOfDay.name}</h2>
-                <p className="text-sm text-zinc-400 mt-0.5">Tap the number to add a pin · tap − to undo</p>
+                <p className="text-sm text-zinc-400 mt-0.5">Quick-add pins below, or tap the number for +1</p>
               </div>
               <div className="flex flex-col gap-2 sm:w-72">
                 {/* Big clickable counter — tap to add a pin */}
@@ -515,7 +515,7 @@ export default function Home() {
                       <span className="text-[11px] text-zinc-500">{data.pinterest.pct}% done</span>
                       {data.pinterest.accountOfDay.pinsCompleted < data.pinterest.accountOfDay.pinsPerBatch ? (
                         <span className="text-[11px] text-violet-300 font-medium flex items-center gap-0.5">
-                          <Plus className="h-3 w-3" /> tap
+                          <Plus className="h-3 w-3" /> +1
                         </span>
                       ) : (
                         <span className="text-[11px] text-emerald-400 font-medium">complete! ✓</span>
@@ -536,6 +536,20 @@ export default function Home() {
                     </span>
                   )}
                 </button>
+                {/* Quick-add buttons — fill to 30 without clicking 30 times */}
+                {data.pinterest.accountOfDay.pinsCompleted < data.pinterest.accountOfDay.pinsPerBatch && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-zinc-500 mr-1">Quick:</span>
+                    <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 5 })} className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 hover:bg-violet-500/20 hover:border-violet-500/40 text-[11px] font-medium text-zinc-300 py-1 transition-colors">+5</button>
+                    <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 10 })} className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 hover:bg-violet-500/20 hover:border-violet-500/40 text-[11px] font-medium text-zinc-300 py-1 transition-colors">+10</button>
+                    <button
+                      onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: data.pinterest.accountOfDay!.pinsPerBatch - data.pinterest.accountOfDay!.pinsCompleted })}
+                      className="flex-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-[11px] font-medium text-emerald-300 py-1 transition-colors"
+                    >
+                      Fill all
+                    </button>
+                  </div>
+                )}
                 <Button
                   size="sm"
                   className="mt-1 bg-violet-600 hover:bg-violet-500 text-white"
@@ -656,6 +670,38 @@ export default function Home() {
             </div>
           )}
         </Card>
+
+        {/* DAILY STATES — last 7 days colored dots */}
+        {!isLoading && data && (
+          <Card className="mb-6 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
+            <div className="flex items-center gap-2 mb-3">
+              <Target className="h-4 w-4 text-violet-400" />
+              <span className="text-sm font-semibold">Daily States · last 7 days</span>
+              <div className="ml-auto flex items-center gap-3 text-[10px] text-zinc-500">
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> perfect</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> partial</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-zinc-600" /> none</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-1.5">
+              {data.history.map((h, i) => {
+                const avg = Math.round((h.pinterest + h.blog + h.patterns) / 3);
+                const isToday = i === data.history.length - 1;
+                const state = avg >= 90 ? "perfect" : avg >= 30 ? "partial" : "none";
+                const dotColor = state === "perfect" ? "bg-emerald-500" : state === "partial" ? "bg-amber-500" : "bg-zinc-600";
+                const label = state === "perfect" ? "Perfect" : state === "partial" ? "Partial" : "None";
+                return (
+                  <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
+                    <span className="text-[10px] text-zinc-500 font-medium">{h.label}</span>
+                    <span className={cn("h-7 w-7 rounded-full flex items-center justify-center transition-all", dotColor, isToday && "ring-2 ring-violet-400 ring-offset-2 ring-offset-zinc-900")} title={`${label} — ${avg}%`} />
+                    <span className={cn("text-[10px] font-medium", state === "perfect" ? "text-emerald-400" : state === "partial" ? "text-amber-400" : "text-zinc-500")}>{avg}%</span>
+                    {isToday && <span className="text-[9px] text-violet-300 font-bold">TODAY</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         {/* CATEGORIES */}
         <div className="mb-4 flex items-center justify-between">
