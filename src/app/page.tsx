@@ -31,6 +31,11 @@ type Category = {
   id: string; name: string; dailyTarget: number; color: string; icon: string;
   doneCount: number; remaining: number; pct: number; tasks: Task[];
 };
+type Objective = {
+  id: string; title: string; target: number; current: number; unit: string;
+  deadline: string | null; category: string; achieved: boolean; achievedAt: string | null;
+  pct: number; daysLeft: number | null;
+};
 type Account = { id: string; name: string; done: boolean; selected: boolean; cycle: number; orderIndex: number; pinsCompleted: number; pinsPerBatch: number };
 type Reminder = { text: string; severity: "info" | "warn" | "good" };
 type Reward = { icon: string; title: string; desc: string; unlocked: boolean };
@@ -42,9 +47,10 @@ type TodayData = {
     accountsDone: number; totalAccounts: number; cycleNumber: number; pct: number;
   };
   categories: Category[];
+  objectives: Objective[];
   streak: { current: number; longest: number; rewards: number; totalDays: number };
-  history: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }>;
-  monthlyHistory: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }>;
+  history: Array<Record<string, unknown>>;
+  monthlyHistory: Array<Record<string, unknown>>;
   overallPct: number;
   reminders: Reminder[];
   rewards: Reward[];
@@ -170,7 +176,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   // in-memory store resets on every cold start, so we can't rely on server).
   // Server is ONLY used for the very first visit (seed data). After that, all
   // reads come from localStorage, all writes go to localStorage.
-  const CACHE_VERSION = "v4-persistent";
+  const CACHE_VERSION = "v5-dynamic-objectives";
   const STORAGE_KEY = `content-os-today-${CACHE_VERSION}`;
 
   // Check localStorage ONCE on mount — if we have data, never fetch from server
@@ -205,6 +211,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
 
   const [addCatOpen, setAddCatOpen] = React.useState(false);
   const [manageAccOpen, setManageAccOpen] = React.useState(false);
+  const [addObjOpen, setAddObjOpen] = React.useState(false);
   const [chartView, setChartView] = React.useState<"weekly" | "monthly">("weekly");
   // localData is the SOLE source of truth for the UI (query is disabled after first load)
   const [localData, setLocalData] = React.useState<TodayData | undefined>(queryData);
@@ -228,22 +235,28 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
     const pPct = d.pinterest.accountOfDay ? Math.min(100, (d.pinterest.accountOfDay.pinsCompleted / d.pinterest.accountOfDay.pinsPerBatch) * 100) : 0;
     const cPcts = d.categories.map((c) => c.pct);
     const overall = Math.round((pPct + (cPcts.length > 0 ? cPcts.reduce((s, p) => s + p, 0) / cPcts.length : 0)) / (cPcts.length > 0 ? 2 : 1));
-    // Chart shows: pinterest line + first 2 categories (or fallback to blog/patterns names)
     const pinPct = Math.round(pPct);
-    const cat1 = d.categories[0]; // first category → "blog" line
-    const cat2 = d.categories[1]; // second category → "patterns" line
-    const blogPct = cat1?.pct ?? d.history[d.history.length-1]?.blog ?? 0;
-    const patternsPct = cat2?.pct ?? d.history[d.history.length-1]?.patterns ?? 0;
-    const updateToday = (arr: typeof d.history) => arr.map((h, i) => {
-      if (i !== arr.length - 1) return h; // only update today (last point)
-      return { ...h, pinterest: pinPct, blog: blogPct, patterns: patternsPct };
+    // DYNAMIC: build a map of categoryName → pct for today's chart point
+    const catPctMap: Record<string, number> = {};
+    for (const c of d.categories) catPctMap[c.name] = c.pct;
+    const updateToday = (arr: Array<Record<string, unknown>>) => arr.map((h, i) => {
+      if (i !== arr.length - 1) return h;
+      const next: Record<string, unknown> = { ...h, pinterest: pinPct };
+      for (const c of d.categories) next[c.name] = c.pct;
+      return next;
     });
+    // Recompute objective pcts
+    const objectives = d.objectives.map((o) => ({
+      ...o,
+      pct: o.target > 0 ? Math.min(100, Math.round((o.current / o.target) * 100)) : 0,
+    }));
     return {
       ...d,
       overallPct: overall,
       pinterest: { ...d.pinterest, pct: pinPct },
       history: updateToday(d.history),
       monthlyHistory: updateToday(d.monthlyHistory),
+      objectives,
     };
   };
 
@@ -517,6 +530,70 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
     },
   });
 
+  // ---- Objectives CRUD ----
+  const [rewardPopup, setRewardPopup] = React.useState<{ title: string; desc: string } | null>(null);
+  const addObjective = useMutation({
+    mutationFn: async (body: Record<string, unknown>) =>
+      fetch(`/api/objectives`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
+    onMutate: async (body) => {
+      const tempId = `temp-obj-${Date.now()}`;
+      const tempObj: Objective = {
+        id: tempId, title: body.title as string, target: (body.target as number) || 100, current: 0,
+        unit: (body.unit as string) || "", deadline: (body.deadline as string) || null,
+        category: (body.category as string) || "Pinterest", achieved: false, achievedAt: null,
+        pct: 0, daysLeft: null,
+      };
+      await qc.cancelQueries({ queryKey: ["today"] });
+      updateData((prev) => ({ ...prev, objectives: [...prev.objectives, tempObj] }));
+      toast({ title: "Objective added!" });
+      return { tempId };
+    },
+    onSuccess: (created: Objective, _v, ctx) => {
+      if (!ctx?.tempId) return;
+      updateData((prev) => ({
+        ...prev,
+        objectives: prev.objectives.map((o) => o.id === ctx.tempId ? {
+          ...created,
+          pct: created.target > 0 ? Math.min(100, Math.round((created.current / created.target) * 100)) : 0,
+          daysLeft: created.deadline ? Math.ceil((new Date(created.deadline).getTime() - Date.now()) / 86400000) : null,
+        } : o),
+      }));
+    },
+  });
+
+  const updateObjectiveProgress = useMutation({
+    mutationFn: async ({ id, current }: { id: string; current: number }) =>
+      fetch(`/api/objectives/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current }) }).then((r) => r.json()),
+    onMutate: async ({ id, current }) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      updateData((prev) => {
+        const objectives = prev.objectives.map((o) => {
+          if (o.id !== id) return o;
+          const wasAchieved = o.achieved;
+          const nowAchieved = current >= o.target;
+          const newObj = { ...o, current, achieved: nowAchieved, achievedAt: nowAchieved && !wasAchieved ? new Date().toISOString() : o.achievedAt, pct: o.target > 0 ? Math.min(100, Math.round((current / o.target) * 100)) : 0 };
+          // Trigger reward popup if just achieved
+          if (nowAchieved && !wasAchieved) {
+            setTimeout(() => setRewardPopup({ title: `🎯 ${o.title}!`, desc: `You reached your goal of ${o.target} ${o.unit}! Keep going 🚀` }), 100);
+          }
+          return newObj;
+        });
+        return { ...prev, objectives };
+      });
+      return {};
+    },
+  });
+
+  const deleteObjective = useMutation({
+    mutationFn: async (id: string) => fetch(`/api/objectives/${id}`, { method: "DELETE" }).then((r) => r.json()),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      updateData((prev) => recompute({ ...prev, objectives: prev.objectives.filter((o) => o.id !== id) }));
+      toast({ title: "Objective removed" });
+      return {};
+    },
+  });
+
   // Pre-warm all API routes on mount so the first action doesn't trigger compilation
   React.useEffect(() => {
     const warm = async () => {
@@ -744,7 +821,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
           )}
         </Card>
 
-        {/* PROGRESS CHART — AREA (weekly/monthly toggle) */}
+        {/* PROGRESS CHART — DYNAMIC AREA (weekly/monthly toggle) */}
         <Card className="mb-6 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -753,50 +830,19 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
             </div>
             {!isLoading && data && (
               <div className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800/50 p-0.5">
-                <button
-                  onClick={() => setChartView("weekly")}
-                  className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "weekly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}
-                >
-                  Weekly
-                </button>
-                <button
-                  onClick={() => setChartView("monthly")}
-                  className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "monthly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}
-                >
-                  Monthly
-                </button>
+                <button onClick={() => setChartView("weekly")} className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "weekly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>Weekly</button>
+                <button onClick={() => setChartView("monthly")} className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "monthly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>Monthly</button>
               </div>
             )}
           </div>
-          {isLoading || !data ? <Skeleton className="h-56 bg-zinc-800" /> : (
-            <div className="h-56" style={{ minHeight: 224 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart key={chartView + "-" + (data.history[data.history.length-1]?.pinterest) + "-" + (data.history[data.history.length-1]?.blog) + "-" + (data.history[data.history.length-1]?.patterns)} data={chartView === "weekly" ? data.history : data.monthlyHistory} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                  <defs>
-                    <linearGradient id="gPin" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gBlog" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="gPat" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" interval={chartView === "monthly" ? 2 : 0} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" unit="%" />
-                  <Tooltip contentStyle={{ borderRadius: "0.5rem", border: "1px solid #3f3f46", background: "#18181b", color: "#f4f4f5", fontSize: "0.75rem" }} />
-                  <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
-                  <Area type="monotone" dataKey="pinterest" stroke="#8b5cf6" strokeWidth={2} fill="url(#gPin)" name="Pinterest" isAnimationActive={false} />
-                  <Area type="monotone" dataKey="blog" stroke="#0ea5e9" strokeWidth={2} fill="url(#gBlog)" name={data.categories[0]?.name ?? "Category 1"} isAnimationActive={false} />
-                  <Area type="monotone" dataKey="patterns" stroke="#10b981" strokeWidth={2} fill="url(#gPat)" name={data.categories[1]?.name ?? "Category 2"} isAnimationActive={false} />
-                </AreaChart>
-              </ResponsiveContainer>
+          {isLoading || !data ? <Skeleton className="h-56 bg-zinc-800" /> : data.categories.length === 0 ? (
+            <div className="h-56 flex flex-col items-center justify-center text-center gap-2">
+              <Target className="h-8 w-8 text-zinc-700" />
+              <p className="text-sm text-zinc-500">No categories yet</p>
+              <p className="text-xs text-zinc-600">Add categories below to see your progress chart</p>
             </div>
+          ) : (
+            <DynamicChart data={chartView === "weekly" ? data.history : data.monthlyHistory} categories={data.categories} view={chartView} />
           )}
         </Card>
 
@@ -812,16 +858,18 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-zinc-600" /> none</span>
               </div>
             </div>
-            <div key={"daily-" + data.history[data.history.length-1]?.pinterest + "-" + data.history[data.history.length-1]?.blog + "-" + data.history[data.history.length-1]?.patterns} className="flex items-center justify-between gap-1.5">
+            <div key={"daily-" + JSON.stringify(data.history[data.history.length-1] || {})} className="flex items-center justify-between gap-1.5">
               {data.history.map((h, i) => {
-                const avg = Math.round((h.pinterest + h.blog + h.patterns) / 3);
+                // Dynamic avg: pinterest + all category values
+                const values = [Number(h.pinterest) || 0, ...data.categories.map((c) => Number(h[c.name]) || 0)];
+                const avg = values.length > 0 ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
                 const isToday = i === data.history.length - 1;
                 const state = avg >= 90 ? "perfect" : avg >= 30 ? "partial" : "none";
                 const dotColor = state === "perfect" ? "bg-emerald-500" : state === "partial" ? "bg-amber-500" : "bg-zinc-600";
                 const label = state === "perfect" ? "Perfect" : state === "partial" ? "Partial" : "None";
                 return (
                   <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
-                    <span className="text-[10px] text-zinc-500 font-medium">{h.label}</span>
+                    <span className="text-[10px] text-zinc-500 font-medium">{String(h.label)}</span>
                     <span className={cn("h-7 w-7 rounded-full flex items-center justify-center transition-all", dotColor, isToday && "ring-2 ring-violet-400 ring-offset-2 ring-offset-zinc-900")} title={`${label} — ${avg}%`} />
                     <span className={cn("text-[10px] font-medium", state === "perfect" ? "text-emerald-400" : state === "partial" ? "text-amber-400" : "text-zinc-500")}>{avg}%</span>
                     {isToday && <span className="text-[9px] text-violet-300 font-bold">TODAY</span>}
@@ -831,6 +879,60 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
             </div>
           </Card>
         )}
+
+        {/* OBJECTIVES — with progress % and reward popups */}
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold flex items-center gap-2">
+            <Target className="h-5 w-5 text-violet-400" /> Objectives
+          </h2>
+          <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200" onClick={() => setAddObjOpen(true)}>
+            <PlusIcon className="h-4 w-4" /> Add Objective
+          </Button>
+        </div>
+
+        <div className="mb-6 grid gap-3 sm:grid-cols-2">
+          {isLoading ? <Skeleton className="h-24 bg-zinc-800" /> : data?.objectives.length === 0 ? (
+            <div className="sm:col-span-2 rounded-lg border border-dashed border-zinc-800 p-6 text-center">
+              <Target className="h-8 w-8 text-zinc-700 mx-auto mb-2" />
+              <p className="text-sm text-zinc-500">No objectives yet</p>
+              <p className="text-xs text-zinc-600 mt-1">Add goals like "100 pins this month" or "€500 revenue" — track progress and earn rewards 🎯</p>
+            </div>
+          ) : data?.objectives.map((o) => {
+            const colors = COLOR_MAP[o.category.toLowerCase()] ?? COLOR_MAP.violet;
+            return (
+              <Card key={o.id} className={cn("border-zinc-800 backdrop-blur p-4 flex flex-col gap-2", o.achieved && "border-emerald-500/40 bg-emerald-500/5")}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {o.achieved && <span className="text-base">🏆</span>}
+                    <span className="text-sm font-semibold text-zinc-100 truncate">{o.title}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {o.achieved ? (
+                      <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-[10px]">ACHIEVED</Badge>
+                    ) : o.daysLeft !== null && o.daysLeft <= 3 && o.daysLeft >= 0 ? (
+                      <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-300 text-[10px]">{o.daysLeft}d left</Badge>
+                    ) : null}
+                    <Button size="icon" variant="ghost" className="h-6 w-6 text-zinc-500 hover:text-rose-400" onClick={() => deleteObjective.mutate(o.id)}><Trash2 className="h-3 w-3" /></Button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-zinc-800">
+                    <div className={cn("h-full rounded-full transition-all", o.achieved ? "bg-emerald-500" : colors.bar)} style={{ width: `${o.pct}%` }} />
+                  </div>
+                  <span className={cn("text-sm font-bold tabular-nums", o.achieved ? "text-emerald-400" : colors.text)}>{o.pct}%</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-zinc-500">
+                  <span>{o.current} / {o.target} {o.unit}</span>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => updateObjectiveProgress.mutate({ id: o.id, current: Math.max(0, o.current - 1) })} className="h-6 w-6 rounded border border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-zinc-200">−</button>
+                    <button onClick={() => updateObjectiveProgress.mutate({ id: o.id, current: o.current + 1 })} className="h-6 w-6 rounded border border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-zinc-200">+</button>
+                    <button onClick={() => updateObjectiveProgress.mutate({ id: o.id, current: o.current + 5 })} className="h-6 px-1.5 rounded border border-zinc-700 bg-zinc-800 text-[10px] text-zinc-400 hover:text-zinc-200">+5</button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
 
         {/* CATEGORIES */}
         <div className="mb-4 flex items-center justify-between">
@@ -917,6 +1019,22 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
         onEdit={(id, name, pinsPerBatch) => editAccount.mutate({ id, name, pinsPerBatch })}
         onDelete={(id) => deleteAccount.mutate(id)}
       />
+      <AddObjectiveDialog open={addObjOpen} onOpenChange={setAddObjOpen} onSubmit={(b) => addObjective.mutate(b)} />
+      {/* REWARD POPUP — confetti style when objective achieved */}
+      {rewardPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in" onClick={() => setRewardPopup(null)}>
+          <div className="relative mx-4 max-w-sm rounded-2xl border border-amber-500/40 bg-gradient-to-br from-zinc-900 to-zinc-950 p-6 text-center shadow-2xl shadow-amber-500/20" onClick={(e) => e.stopPropagation()}>
+            <div className="text-5xl mb-3 animate-bounce">🎉</div>
+            <h3 className="text-xl font-bold text-amber-300 mb-1">{rewardPopup.title}</h3>
+            <p className="text-sm text-zinc-300 mb-4">{rewardPopup.desc}</p>
+            <div className="text-3xl mb-4">🏆⭐🎯</div>
+            <Button className="bg-amber-500 hover:bg-amber-400 text-zinc-900 font-semibold" onClick={() => setRewardPopup(null)}>
+              Keep going! 🚀
+            </Button>
+            <button className="absolute top-2 right-2 text-zinc-500 hover:text-zinc-300" onClick={() => setRewardPopup(null)}><X className="h-4 w-4" /></button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1109,6 +1227,93 @@ function ManageAccountsDialog({
 
         <DialogFooter>
           <Button variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-200" onClick={() => onOpenChange(false)}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// DYNAMIC CHART — renders area for pinterest + each category dynamically
+const CHART_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e", "#06b6d4", "#ec4899", "#84cc16"];
+function DynamicChart({ data, categories, view }: { data: Array<Record<string, unknown>>; categories: Category[]; view: string }) {
+  const today = data[data.length - 1] || {};
+  const keys = ["pinterest", ...categories.map((c) => c.name)];
+  const keyStr = keys.map((k) => `${k}=${today[k] ?? 0}`).join("-");
+  return (
+    <div className="h-56" style={{ minHeight: 224 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart key={view + "-" + keyStr} data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+          <defs>
+            {keys.map((k, i) => {
+              const color = CHART_COLORS[i % CHART_COLORS.length];
+              return (
+                <linearGradient key={k} id={"g-" + k.replace(/[^a-zA-Z0-9]/g, "")} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={color} stopOpacity={0.4} />
+                  <stop offset="95%" stopColor={color} stopOpacity={0} />
+                </linearGradient>
+              );
+            })}
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" interval={view === "monthly" ? 2 : 0} />
+          <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" unit="%" />
+          <Tooltip contentStyle={{ borderRadius: "0.5rem", border: "1px solid #3f3f46", background: "#18181b", color: "#f4f4f5", fontSize: "0.75rem" }} />
+          <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
+          {keys.map((k, i) => {
+            const color = CHART_COLORS[i % CHART_COLORS.length];
+            return <Area key={k} type="monotone" dataKey={k} stroke={color} strokeWidth={2} fill={"url(#g-" + k.replace(/[^a-zA-Z0-9]/g, "") + ")"} name={k === "pinterest" ? "Pinterest" : k} isAnimationActive={false} />;
+          })}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function AddObjectiveDialog({ open, onOpenChange, onSubmit }: { open: boolean; onOpenChange: (o: boolean) => void; onSubmit: (b: Record<string, unknown>) => void }) {
+  const [title, setTitle] = React.useState("");
+  const [target, setTarget] = React.useState("100");
+  const [unit, setUnit] = React.useState("");
+  const [category, setCategory] = React.useState("violet");
+  const [deadline, setDeadline] = React.useState("");
+  React.useEffect(() => { if (open) { setTitle(""); setTarget("100"); setUnit(""); setCategory("violet"); setDeadline(""); } }, [open]);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md bg-zinc-900 border-zinc-800">
+        <DialogHeader><DialogTitle className="text-zinc-100">Add Objective</DialogTitle></DialogHeader>
+        <div className="flex flex-col gap-3 py-2">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-zinc-400">Title</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. 100 pins this month, 500 revenue..." className="bg-zinc-800 border-zinc-700" autoFocus />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-zinc-400">Target</Label>
+              <Input type="number" min={1} value={target} onChange={(e) => setTarget(e.target.value)} className="bg-zinc-800 border-zinc-700" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-zinc-400">Unit (optional)</Label>
+              <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="pins, eur, articles..." className="bg-zinc-800 border-zinc-700" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-zinc-400">Category color</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger className="bg-zinc-800 border-zinc-700"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.keys(COLOR_MAP).map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-zinc-400">Deadline (optional)</Label>
+              <Input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="bg-zinc-800 border-zinc-700" />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-200" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button className="bg-violet-600 hover:bg-violet-500 text-white" disabled={!title} onClick={() => onSubmit({ title, target: parseInt(target) || 100, unit, category, deadline: deadline || null })}>Add Objective</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

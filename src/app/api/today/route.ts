@@ -17,13 +17,11 @@ export async function GET() {
     store.accounts[0].selected = true;
   }
 
-  // Account of day = selected not-done, else first not-done
   let accountOfDay = store.accounts.find((a) => !a.doneThisCycle && a.selected) ?? store.accounts.find((a) => !a.doneThisCycle) ?? null;
-
   const accountsDone = store.accounts.filter((a) => a.doneThisCycle).length;
   const cycleNumber = store.accounts[0]?.cycle ?? 1;
 
-  // Categories with tasks + progress
+  // Categories with tasks + progress (DYNAMIC — any number of categories)
   const categories = store.categories.map((c) => {
     const catTasks = store.tasks.filter((t) => t.categoryId === c.id);
     const doneCount = catTasks.filter((t) => t.done).length;
@@ -35,55 +33,43 @@ export async function GET() {
     };
   });
 
-  // 7-day history (weekly view)
-  const history: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }> = [];
-  for (let d = 6; d >= 0; d--) {
-    const day = startOfDay(new Date(now.getTime() - d * 86400000));
-    const dayLogs = store.logs.filter((l) => startOfDay(new Date(l.date)).getTime() === day.getTime());
-    const pinterestPct = Math.min(100, Math.round(((dayLogs.find((l) => l.categoryId === null)?.pinsCompleted ?? 0) / 30) * 100));
-    const byCat = (catName: string) => {
-      const cat = store.categories.find((c) => c.name === catName);
-      if (!cat) return 0;
-      const log = dayLogs.find((l) => l.categoryId === cat.id);
-      if (!log || cat.dailyTarget === 0) return 0;
-      return Math.min(100, Math.round((log.tasksCompleted / cat.dailyTarget) * 100));
-    };
-    history.push({
-      label: day.toLocaleDateString("en-US", { weekday: "short" }),
-      date: day.toISOString(),
-      pinterest: pinterestPct,
-      blog: byCat("Blog"),
-      patterns: byCat("Patterns"),
-    });
-  }
-
-  // 30-day history (monthly view) — aggregate per day
-  const monthlyHistory: Array<{ label: string; date: string; pinterest: number; blog: number; patterns: number }> = [];
-  for (let d = 29; d >= 0; d--) {
-    const day = startOfDay(new Date(now.getTime() - d * 86400000));
-    const dayLogs = store.logs.filter((l) => startOfDay(new Date(l.date)).getTime() === day.getTime());
-    const pinterestPct = Math.min(100, Math.round(((dayLogs.find((l) => l.categoryId === null)?.pinsCompleted ?? 0) / 30) * 100));
-    const byCat = (catName: string) => {
-      const cat = store.categories.find((c) => c.name === catName);
-      if (!cat) return 0;
-      const log = dayLogs.find((l) => l.categoryId === cat.id);
-      if (!log || cat.dailyTarget === 0) return 0;
-      return Math.min(100, Math.round((log.tasksCompleted / cat.dailyTarget) * 100));
-    };
-    monthlyHistory.push({
-      label: day.toLocaleDateString("en-US", { day: "numeric" }),
-      date: day.toISOString(),
-      pinterest: pinterestPct,
-      blog: byCat("Blog"),
-      patterns: byCat("Patterns"),
-    });
-  }
+  // Build DYNAMIC chart data — each day has {label, date, [categoryName]: pct, pinterest: pct}
+  // We map category names to chart keys by replacing spaces + lowercasing
+  const catKeys = categories.map((c) => c.name);
+  const buildHistory = (days: number) => {
+    const history: Array<Record<string, unknown>> = [];
+    for (let d = days - 1; d >= 0; d--) {
+      const day = startOfDay(new Date(now.getTime() - d * 86400000));
+      const dayLogs = store.logs.filter((l) => startOfDay(new Date(l.date)).getTime() === day.getTime());
+      const entry: Record<string, unknown> = {
+        label: days <= 7 ? day.toLocaleDateString("en-US", { weekday: "short" }) : day.toLocaleDateString("en-US", { day: "numeric" }),
+        date: day.toISOString(),
+        pinterest: Math.min(100, Math.round(((dayLogs.find((l) => l.categoryId === null)?.pinsCompleted ?? 0) / 30) * 100)),
+      };
+      for (const cat of categories) {
+        const log = dayLogs.find((l) => l.categoryId === cat.id);
+        const tasksDone = log?.tasksCompleted ?? 0;
+        entry[cat.name] = cat.dailyTarget > 0 ? Math.min(100, Math.round((tasksDone / cat.dailyTarget) * 100)) : 0;
+      }
+      history.push(entry);
+    }
+    return history;
+  };
+  const history = buildHistory(7);
+  const monthlyHistory = buildHistory(30);
 
   const pinterestPct = accountOfDay ? Math.min(100, (accountOfDay.pinsCompleted / accountOfDay.pinsPerBatch) * 100) : 0;
   const categoryPcts = categories.map((c) => c.pct);
   const overallPct = Math.round((pinterestPct + (categoryPcts.length > 0 ? categoryPcts.reduce((s, p) => s + p, 0) / categoryPcts.length : 0)) / (categoryPcts.length > 0 ? 2 : 1));
 
-  // Reminders
+  // Objectives with progress %
+  const objectives = store.objectives.map((o) => {
+    const pct = o.target > 0 ? Math.min(100, Math.round((o.current / o.target) * 100)) : 0;
+    const daysLeft = o.deadline ? Math.ceil((new Date(o.deadline).getTime() - now.getTime()) / 86400000) : null;
+    return { ...o, pct, daysLeft };
+  });
+
+  // Reminders — include unmet objectives
   const reminders: Array<{ text: string; severity: "info" | "warn" | "good" }> = [];
   if (accountOfDay) {
     const remaining = Math.max(0, accountOfDay.pinsPerBatch - accountOfDay.pinsCompleted);
@@ -94,9 +80,18 @@ export async function GET() {
     if (c.remaining > 0) reminders.push({ text: `${c.name}: ${c.remaining} task(s) left`, severity: "info" });
     else reminders.push({ text: `${c.name} target hit!`, severity: "good" });
   }
+  // Objectives reminders
+  for (const o of objectives) {
+    if (o.achieved) {
+      reminders.push({ text: `🎯 ${o.title} — achieved!`, severity: "good" });
+    } else if (o.daysLeft !== null && o.daysLeft <= 3 && o.daysLeft >= 0) {
+      reminders.push({ text: `⏰ ${o.title}: ${o.daysLeft} day(s) left (${o.pct}%)`, severity: "warn" });
+    } else if (o.pct < 50) {
+      reminders.push({ text: `📈 ${o.title}: ${o.current}/${o.target} ${o.unit} (${o.pct}%)`, severity: "info" });
+    }
+  }
   if (reminders.length === 0) reminders.push({ text: "All done for today! 🎉", severity: "good" });
 
-  // Rewards
   const rewards: Array<{ icon: string; title: string; desc: string; unlocked: boolean }> = [
     { icon: "🔥", title: `${store.streak.currentStreak} Day Streak`, desc: "Come back tomorrow to extend", unlocked: store.streak.currentStreak > 0 },
     { icon: "🎯", title: "Pinterest Done", desc: "Finish today's account", unlocked: accountOfDay ? accountOfDay.pinsCompleted >= accountOfDay.pinsPerBatch : false },
@@ -119,6 +114,7 @@ export async function GET() {
       pct: Math.round(pinterestPct),
     },
     categories,
+    objectives,
     streak: { current: store.streak.currentStreak, longest: store.streak.longestStreak, rewards: store.streak.rewards, totalDays: store.streak.totalDays },
     history,
     monthlyHistory,
