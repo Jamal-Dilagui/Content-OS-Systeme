@@ -21,9 +21,10 @@ import {
 } from "recharts";
 import {
   CheckCircle2, Circle, Plus, Minus, Image as ImageIcon, Sparkles, Flame, Trophy,
-  Bell, Target, Plus as PlusIcon, Trash2, X, Check, Lock, Settings, Pencil, RotateCcw,
+  Bell, Target, Plus as PlusIcon, Trash2, X, Check, Lock, Settings, Pencil, RotateCcw, LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { login, logout, getSession, type Session } from "@/lib/auth";
 
 type Task = { id: string; title: string; done: boolean };
 type Category = {
@@ -61,6 +62,107 @@ const CHART_COLOR: Record<string, string> = { pinterest: "#8b5cf6", blog: "#0ea5
 const COLOR_OPTIONS = ["violet", "sky", "emerald", "amber", "rose", "cyan"];
 
 export default function Home() {
+  // Auth gate — show login screen if not authenticated
+  const [session, setSession] = React.useState<Session | null>(null);
+  const [authChecked, setAuthChecked] = React.useState(false);
+
+  React.useEffect(() => {
+    setSession(getSession());
+    setAuthChecked(true);
+  }, []);
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <Sparkles className="h-8 w-8 text-violet-400 animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen onLogin={() => setSession(getSession())} />;
+  }
+
+  return <AppContent session={session} onLogout={() => { logout(); setSession(null); }} />;
+}
+
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [username, setUsername] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (login(username, password)) {
+      onLogin();
+    } else {
+      setError("Invalid username or password");
+      setPassword("");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col items-center mb-8">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-lg shadow-violet-500/30 mb-4">
+            <Sparkles className="h-7 w-7 text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-zinc-100">Content OS</h1>
+          <p className="text-xs text-zinc-500 mt-1">Sign in to your dashboard</p>
+        </div>
+
+        <Card className="border-zinc-800 bg-zinc-900/60 backdrop-blur p-6">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="username" className="text-xs text-zinc-400">Username</Label>
+              <Input
+                id="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Enter username"
+                autoComplete="username"
+                className="bg-zinc-800 border-zinc-700 text-zinc-100"
+                autoFocus
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="password" className="text-xs text-zinc-400">Password</Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter password"
+                  autoComplete="current-password"
+                  className="bg-zinc-800 border-zinc-700 text-zinc-100 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs"
+                >
+                  {showPassword ? "hide" : "show"}
+                </button>
+              </div>
+            </div>
+            {error && (
+              <p className="text-xs text-rose-400 font-medium">{error}</p>
+            )}
+            <Button type="submit" className="bg-violet-600 hover:bg-violet-500 text-white">
+              Sign in
+            </Button>
+          </form>
+        </Card>
+        <p className="text-center text-[10px] text-zinc-600 mt-4">Content OS · Admin access only</p>
+      </div>
+    </div>
+  );
+}
+
+function AppContent({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -463,6 +565,15 @@ export default function Home() {
               title="Reset all data to initial state"
             >
               <RotateCcw className="h-3 w-3" /> Reset
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-zinc-700 bg-zinc-800 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-300 text-zinc-300 text-xs"
+              onClick={onLogout}
+              title="Sign out"
+            >
+              <LogOut className="h-3 w-3" /> Logout
             </Button>
           </div>
         </header>
