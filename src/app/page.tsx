@@ -228,11 +228,12 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
     const pPct = d.pinterest.accountOfDay ? Math.min(100, (d.pinterest.accountOfDay.pinsCompleted / d.pinterest.accountOfDay.pinsPerBatch) * 100) : 0;
     const cPcts = d.categories.map((c) => c.pct);
     const overall = Math.round((pPct + (cPcts.length > 0 ? cPcts.reduce((s, p) => s + p, 0) / cPcts.length : 0)) / (cPcts.length > 0 ? 2 : 1));
-    // Update today's history point so the chart updates live with actions
-    // Map categories to chart lines: blog, patterns (existing) + generic fallback
-    const blogPct = d.categories.find((c) => c.name.toLowerCase() === "blog")?.pct ?? d.history[d.history.length-1]?.blog ?? 0;
-    const patternsPct = d.categories.find((c) => c.name.toLowerCase() === "patterns")?.pct ?? d.history[d.history.length-1]?.patterns ?? 0;
+    // Chart shows: pinterest line + first 2 categories (or fallback to blog/patterns names)
     const pinPct = Math.round(pPct);
+    const cat1 = d.categories[0]; // first category → "blog" line
+    const cat2 = d.categories[1]; // second category → "patterns" line
+    const blogPct = cat1?.pct ?? d.history[d.history.length-1]?.blog ?? 0;
+    const patternsPct = cat2?.pct ?? d.history[d.history.length-1]?.patterns ?? 0;
     const updateToday = (arr: typeof d.history) => arr.map((h, i) => {
       if (i !== arr.length - 1) return h; // only update today (last point)
       return { ...h, pinterest: pinPct, blog: blogPct, patterns: patternsPct };
@@ -791,8 +792,8 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
                   <Tooltip contentStyle={{ borderRadius: "0.5rem", border: "1px solid #3f3f46", background: "#18181b", color: "#f4f4f5", fontSize: "0.75rem" }} />
                   <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
                   <Area type="monotone" dataKey="pinterest" stroke="#8b5cf6" strokeWidth={2} fill="url(#gPin)" name="Pinterest" isAnimationActive={false} />
-                  <Area type="monotone" dataKey="blog" stroke="#0ea5e9" strokeWidth={2} fill="url(#gBlog)" name="Blog" isAnimationActive={false} />
-                  <Area type="monotone" dataKey="patterns" stroke="#10b981" strokeWidth={2} fill="url(#gPat)" name="Patterns" isAnimationActive={false} />
+                  <Area type="monotone" dataKey="blog" stroke="#0ea5e9" strokeWidth={2} fill="url(#gBlog)" name={data.categories[0]?.name ?? "Category 1"} isAnimationActive={false} />
+                  <Area type="monotone" dataKey="patterns" stroke="#10b981" strokeWidth={2} fill="url(#gPat)" name={data.categories[1]?.name ?? "Category 2"} isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
