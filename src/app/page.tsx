@@ -1236,15 +1236,21 @@ function ManageAccountsDialog({
 // DYNAMIC CHART — renders area for pinterest + each category dynamically
 const CHART_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e", "#06b6d4", "#ec4899", "#84cc16"];
 function DynamicChart({ data, categories, view }: { data: Array<Record<string, unknown>>; categories: Category[]; view: string }) {
-  const today = data[data.length - 1] || {};
   // Build keys: pinterest (pins) + categories, but skip any category named "Pinterest"/"pinterest" to avoid duplicates
   const filteredCats = categories.filter((c) => c.name.toLowerCase() !== "pinterest" && c.name.toLowerCase() !== "pins");
   const keys = ["pinterest", ...filteredCats.map((c) => c.name)];
+  // Normalize data: ensure every point has all keys (default 0) so chart renders consistently
+  const normalizedData = data.map((h) => {
+    const next: Record<string, unknown> = { ...h };
+    for (const k of keys) if (next[k] === undefined) next[k] = 0;
+    return next;
+  });
+  const today = normalizedData[normalizedData.length - 1] || {};
   const keyStr = keys.map((k) => `${k}=${today[k] ?? 0}`).join("-");
   return (
     <div className="h-56" style={{ minHeight: 224 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart key={view + "-" + keyStr} data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+        <AreaChart key={view + "-" + keyStr} data={normalizedData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
           <defs>
             {keys.map((k, i) => {
               const color = CHART_COLORS[i % CHART_COLORS.length];
