@@ -1237,7 +1237,9 @@ function ManageAccountsDialog({
 const CHART_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e", "#06b6d4", "#ec4899", "#84cc16"];
 function DynamicChart({ data, categories, view }: { data: Array<Record<string, unknown>>; categories: Category[]; view: string }) {
   const today = data[data.length - 1] || {};
-  const keys = ["pinterest", ...categories.map((c) => c.name)];
+  // Build keys: pinterest (pins) + categories, but skip any category named "Pinterest"/"pinterest" to avoid duplicates
+  const filteredCats = categories.filter((c) => c.name.toLowerCase() !== "pinterest" && c.name.toLowerCase() !== "pins");
+  const keys = ["pinterest", ...filteredCats.map((c) => c.name)];
   const keyStr = keys.map((k) => `${k}=${today[k] ?? 0}`).join("-");
   return (
     <div className="h-56" style={{ minHeight: 224 }}>
@@ -1261,7 +1263,7 @@ function DynamicChart({ data, categories, view }: { data: Array<Record<string, u
           <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
           {keys.map((k, i) => {
             const color = CHART_COLORS[i % CHART_COLORS.length];
-            return <Area key={k} type="monotone" dataKey={k} stroke={color} strokeWidth={2} fill={"url(#g-" + k.replace(/[^a-zA-Z0-9]/g, "") + ")"} name={k === "pinterest" ? "Pinterest" : k} isAnimationActive={false} />;
+            return <Area key={k} type="monotone" dataKey={k} stroke={color} strokeWidth={2} fill={"url(#g-" + k.replace(/[^a-zA-Z0-9]/g, "") + ")"} name={k === "pinterest" ? "Pins (account)" : k} isAnimationActive={false} />;
           })}
         </AreaChart>
       </ResponsiveContainer>
