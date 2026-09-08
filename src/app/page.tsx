@@ -206,21 +206,22 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   const [addCatOpen, setAddCatOpen] = React.useState(false);
   const [manageAccOpen, setManageAccOpen] = React.useState(false);
   const [chartView, setChartView] = React.useState<"weekly" | "monthly">("weekly");
-  // Local state mirror — guarantees chart re-renders on mutations (query is disabled)
+  // localData is the SOLE source of truth for the UI (query is disabled after first load)
   const [localData, setLocalData] = React.useState<TodayData | undefined>(queryData);
-  const data = localData; // all JSX uses this — updates instantly on mutations
+  const data = localData;
 
-  // Keep localData in sync with query data
-  React.useEffect(() => { setLocalData(queryData); }, [queryData]);
+  // Sync from query on first load (seed data)
+  React.useEffect(() => { if (queryData) setLocalData(queryData); }, [queryData]);
 
-  // Helper: recompute overallPct + persist to localStorage + update local state
+  // Helper: update localData + localStorage + query cache (for mutations)
   const updateData = (updater: (prev: TodayData) => TodayData) => {
-    const prev = qc.getQueryData<TodayData>(["today"]);
-    if (!prev) return;
-    const next = updater(prev);
-    qc.setQueryData(["today"], next);
-    setLocalData(next); // force chart + UI re-render
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+    setLocalData((prev) => {
+      if (!prev) return prev;
+      const next = updater(prev);
+      qc.setQueryData(["today"], next);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next; // triggers re-render → chart + daily states update live
+    });
   };
 
   const recompute = (d: TodayData): TodayData => {
@@ -810,7 +811,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-zinc-600" /> none</span>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-1.5">
+            <div key={"daily-" + data.history[data.history.length-1]?.pinterest + "-" + data.history[data.history.length-1]?.blog + "-" + data.history[data.history.length-1]?.patterns} className="flex items-center justify-between gap-1.5">
               {data.history.map((h, i) => {
                 const avg = Math.round((h.pinterest + h.blog + h.patterns) / 3);
                 const isToday = i === data.history.length - 1;
