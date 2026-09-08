@@ -179,7 +179,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
     try { return !!localStorage.getItem(STORAGE_KEY); } catch { return false; }
   });
 
-  const { data, isLoading } = useQuery<TodayData>({
+  const { data: queryData, isLoading } = useQuery<TodayData>({
     queryKey: ["today"],
     queryFn: async () => {
       const res = await fetch("/api/today");
@@ -206,13 +206,20 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   const [addCatOpen, setAddCatOpen] = React.useState(false);
   const [manageAccOpen, setManageAccOpen] = React.useState(false);
   const [chartView, setChartView] = React.useState<"weekly" | "monthly">("weekly");
+  // Local state mirror — guarantees chart re-renders on mutations (query is disabled)
+  const [localData, setLocalData] = React.useState<TodayData | undefined>(queryData);
+  const data = localData; // all JSX uses this — updates instantly on mutations
 
-  // Helper: recompute overallPct + persist to localStorage
+  // Keep localData in sync with query data
+  React.useEffect(() => { setLocalData(queryData); }, [queryData]);
+
+  // Helper: recompute overallPct + persist to localStorage + update local state
   const updateData = (updater: (prev: TodayData) => TodayData) => {
     const prev = qc.getQueryData<TodayData>(["today"]);
     if (!prev) return;
     const next = updater(prev);
     qc.setQueryData(["today"], next);
+    setLocalData(next); // force chart + UI re-render
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
   };
 
@@ -762,7 +769,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
           {isLoading || !data ? <Skeleton className="h-56 bg-zinc-800" /> : (
             <div className="h-56" style={{ minHeight: 224 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartView === "weekly" ? data.history : data.monthlyHistory} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                <AreaChart key={chartView + "-" + (data.history[data.history.length-1]?.pinterest) + "-" + (data.history[data.history.length-1]?.blog) + "-" + (data.history[data.history.length-1]?.patterns)} data={chartView === "weekly" ? data.history : data.monthlyHistory} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                   <defs>
                     <linearGradient id="gPin" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
