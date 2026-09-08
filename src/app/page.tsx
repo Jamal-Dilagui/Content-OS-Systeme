@@ -64,7 +64,15 @@ const COLOR_MAP: Record<string, { bg: string; text: string; bar: string; chip: s
   rose: { bg: "bg-rose-500/10", text: "text-rose-300", bar: "bg-rose-500", chip: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
   cyan: { bg: "bg-cyan-500/10", text: "text-cyan-300", bar: "bg-cyan-500", chip: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
 };
-const CHART_COLOR: Record<string, string> = { pinterest: "#8b5cf6", blog: "#0ea5e9", patterns: "#10b981" };
+// Map category color name → hex (for chart lines)
+const COLOR_HEX: Record<string, string> = {
+  violet: "#8b5cf6",
+  sky: "#0ea5e9",
+  emerald: "#10b981",
+  amber: "#f59e0b",
+  rose: "#f43f5e",
+  cyan: "#06b6d4",
+};
 const COLOR_OPTIONS = ["violet", "sky", "emerald", "amber", "rose", "cyan"];
 
 export default function Home() {
@@ -880,6 +888,53 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
           </Card>
         )}
 
+        {/* HISTORIQUE — detailed log of last 30 days */}
+        {!isLoading && data && (
+          <Card className="mb-6 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
+            <div className="flex items-center gap-2 mb-3">
+              <Target className="h-4 w-4 text-violet-400" />
+              <span className="text-sm font-semibold">Historique · last 30 days</span>
+              <span className="ml-auto text-[10px] text-zinc-500">scroll to see more →</span>
+            </div>
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-zinc-800">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-zinc-900/95 backdrop-blur">
+                  <tr className="border-b border-zinc-800 text-left text-zinc-500">
+                    <th className="py-2 px-3 font-medium">Date</th>
+                    <th className="py-2 px-2 font-medium text-center">Pins</th>
+                    {data.categories.map((c) => (
+                      <th key={c.id} className="py-2 px-2 font-medium text-center" style={{ color: COLOR_HEX[c.color] ?? "#a1a1aa" }}>{c.name}</th>
+                    ))}
+                    <th className="py-2 px-2 font-medium text-center">Avg</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...data.monthlyHistory].reverse().map((h, idx) => {
+                    const pin = Number(h.pinterest) || 0;
+                    const catVals = data.categories.map((c) => Number(h[c.name]) || 0);
+                    const allVals = [pin, ...catVals];
+                    const avg = allVals.length > 0 ? Math.round(allVals.reduce((s, v) => s + v, 0) / allVals.length) : 0;
+                    const isToday = idx === 0;
+                    return (
+                      <tr key={idx} className={cn("border-b border-zinc-800/50", isToday && "bg-violet-500/5")}>
+                        <td className="py-1.5 px-3 text-zinc-400 font-medium">
+                          {String(h.label)} {isToday && <span className="text-violet-300 text-[9px] ml-1">TODAY</span>}
+                        </td>
+                        <td className="py-1.5 px-2 text-center tabular-nums text-zinc-300">{pin}%</td>
+                        {data.categories.map((c) => {
+                          const v = Number(h[c.name]) || 0;
+                          return <td key={c.id} className="py-1.5 px-2 text-center tabular-nums" style={{ color: v > 0 ? COLOR_HEX[c.color] : "#52525b" }}>{v}%</td>;
+                        })}
+                        <td className="py-1.5 px-2 text-center tabular-nums font-bold" style={{ color: avg >= 90 ? "#10b981" : avg >= 30 ? "#f59e0b" : "#71717a" }}>{avg}%</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+
         {/* OBJECTIVES — with progress % and reward popups */}
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold flex items-center gap-2">
@@ -1234,7 +1289,12 @@ function ManageAccountsDialog({
 }
 
 // DYNAMIC CHART — renders area for pinterest + each category dynamically
-const CHART_COLORS = ["#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e", "#06b6d4", "#ec4899", "#84cc16"];
+// Each category uses its OWN color (chosen at creation), pinterest line = violet
+function getColorForKey(key: string, categories: Category[]): string {
+  if (key === "pinterest") return COLOR_HEX.violet; // pinterest (pins) line always violet
+  const cat = categories.find((c) => c.name === key);
+  return cat ? (COLOR_HEX[cat.color] ?? "#8b5cf6") : "#8b5cf6";
+}
 function DynamicChart({ data, categories, view }: { data: Array<Record<string, unknown>>; categories: Category[]; view: string }) {
   // Build keys: pinterest (pins) + categories, but skip any category named "Pinterest"/"pinterest" to avoid duplicates
   const filteredCats = categories.filter((c) => c.name.toLowerCase() !== "pinterest" && c.name.toLowerCase() !== "pins");
@@ -1252,8 +1312,8 @@ function DynamicChart({ data, categories, view }: { data: Array<Record<string, u
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart key={view + "-" + keyStr} data={normalizedData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
           <defs>
-            {keys.map((k, i) => {
-              const color = CHART_COLORS[i % CHART_COLORS.length];
+            {keys.map((k) => {
+              const color = getColorForKey(k, categories);
               return (
                 <linearGradient key={k} id={"g-" + k.replace(/[^a-zA-Z0-9]/g, "")} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={color} stopOpacity={0.4} />
@@ -1267,8 +1327,8 @@ function DynamicChart({ data, categories, view }: { data: Array<Record<string, u
           <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#a1a1aa" }} stroke="#3f3f46" unit="%" />
           <Tooltip contentStyle={{ borderRadius: "0.5rem", border: "1px solid #3f3f46", background: "#18181b", color: "#f4f4f5", fontSize: "0.75rem" }} />
           <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
-          {keys.map((k, i) => {
-            const color = CHART_COLORS[i % CHART_COLORS.length];
+          {keys.map((k) => {
+            const color = getColorForKey(k, categories);
             return <Area key={k} type="monotone" dataKey={k} stroke={color} strokeWidth={2} fill={"url(#g-" + k.replace(/[^a-zA-Z0-9]/g, "") + ")"} name={k === "pinterest" ? "Pins (account)" : k} isAnimationActive={false} />;
           })}
         </AreaChart>
