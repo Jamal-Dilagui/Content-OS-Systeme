@@ -241,19 +241,22 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
 
   const recompute = (d: TodayData): TodayData => {
     const pPct = d.pinterest.accountOfDay ? Math.min(100, (d.pinterest.accountOfDay.pinsCompleted / d.pinterest.accountOfDay.pinsPerBatch) * 100) : 0;
-    const cPcts = d.categories.map((c) => c.pct);
+    // Recompute each category's pct based on done/total (no dailyTarget)
+    const catsWithPct = d.categories.map((c) => {
+      const total = c.tasks.length;
+      const doneCount = c.tasks.filter((t) => t.done).length;
+      const pct = total > 0 ? Math.min(100, Math.round((doneCount / total) * 100)) : 0;
+      return { ...c, doneCount, remaining: Math.max(0, total - doneCount), pct, dailyTarget: total };
+    });
+    const cPcts = catsWithPct.map((c) => c.pct);
     const overall = Math.round((pPct + (cPcts.length > 0 ? cPcts.reduce((s, p) => s + p, 0) / cPcts.length : 0)) / (cPcts.length > 0 ? 2 : 1));
     const pinPct = Math.round(pPct);
-    // DYNAMIC: build a map of categoryName → pct for today's chart point
-    const catPctMap: Record<string, number> = {};
-    for (const c of d.categories) catPctMap[c.name] = c.pct;
     const updateToday = (arr: Array<Record<string, unknown>>) => arr.map((h, i) => {
       if (i !== arr.length - 1) return h;
       const next: Record<string, unknown> = { ...h, pinterest: pinPct };
-      for (const c of d.categories) next[c.name] = c.pct;
+      for (const c of catsWithPct) next[c.name] = c.pct;
       return next;
     });
-    // Recompute objective pcts
     const objectives = d.objectives.map((o) => ({
       ...o,
       pct: o.target > 0 ? Math.min(100, Math.round((o.current / o.target) * 100)) : 0,
@@ -265,6 +268,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
       history: updateToday(d.history),
       monthlyHistory: updateToday(d.monthlyHistory),
       objectives,
+      categories: catsWithPct,
     };
   };
 
@@ -343,8 +347,8 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
           const newDone = !task.done;
           const tasks = c.tasks.map((t) => t.id === id ? { ...t, done: newDone } : t);
           const doneCount = tasks.filter((t) => t.done).length;
-          const pct = c.dailyTarget > 0 ? Math.min(100, Math.round((doneCount / c.dailyTarget) * 100)) : 0;
-          return { ...c, tasks, doneCount, remaining: Math.max(0, c.dailyTarget - doneCount), pct };
+          const pct = tasks.length > 0 ? Math.min(100, Math.round((doneCount / tasks.length) * 100)) : 0;
+          return { ...c, tasks, doneCount, remaining: Math.max(0, tasks.length - doneCount), pct, dailyTarget: tasks.length };
         }),
       }));
       return {};
@@ -385,11 +389,26 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
         categories: prev.categories.map((c) => {
           const tasks = c.tasks.filter((t) => t.id !== id);
           if (tasks.length === c.tasks.length) return c;
-          const doneCount = tasks.filter((t) => t.done).length;
-          const pct = c.dailyTarget > 0 ? Math.min(100, Math.round((doneCount / c.dailyTarget) * 100)) : 0;
-          return { ...c, tasks, doneCount, remaining: Math.max(0, c.dailyTarget - doneCount), pct };
+          return { ...c, tasks };
         }),
       }));
+      return {};
+    },
+  });
+
+  const editTask = useMutation({
+    mutationFn: async ({ id, title }: { id: string; title: string }) =>
+      fetch(`/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) }).then((r) => r.json()),
+    onMutate: async ({ id, title }) => {
+      await qc.cancelQueries({ queryKey: ["today"] });
+      updateData((prev) => recompute({
+        ...prev,
+        categories: prev.categories.map((c) => ({
+          ...c,
+          tasks: c.tasks.map((t) => t.id === id ? { ...t, title } : t),
+        })),
+      }));
+      toast({ title: "Task updated" });
       return {};
     },
   });
@@ -1009,6 +1028,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
                   onToggle={(id) => toggleTask.mutate(id)}
                   onAddTask={(title) => addTask.mutate({ categoryId: cat.id, title })}
                   onDeleteTask={(id) => deleteTask.mutate(id)}
+                  onEditTask={(id, title) => editTask.mutate({ id, title })}
                   onDeleteCategory={() => deleteCategory.mutate(cat.id)}
                 />
               ))}
@@ -1095,17 +1115,20 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
 }
 
 function CategoryCard({
-  cat, onToggle, onAddTask, onDeleteTask, onDeleteCategory,
+  cat, onToggle, onAddTask, onDeleteTask, onEditTask, onDeleteCategory,
 }: {
   cat: Category;
   onToggle: (id: string) => void;
   onAddTask: (title: string) => void;
   onDeleteTask: (id: string) => void;
+  onEditTask: (id: string, title: string) => void;
   onDeleteCategory: () => void;
 }) {
   const colors = COLOR_MAP[cat.color] ?? COLOR_MAP.violet;
   const [newTask, setNewTask] = React.useState("");
   const [showInput, setShowInput] = React.useState(false);
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [editText, setEditText] = React.useState("");
 
   const submit = () => {
     if (!newTask.trim()) return;
@@ -1114,13 +1137,25 @@ function CategoryCard({
     setShowInput(false);
   };
 
+  const startEdit = (id: string, currentTitle: string) => {
+    setEditingId(id);
+    setEditText(currentTitle);
+  };
+
+  const saveEdit = () => {
+    if (!editingId || !editText.trim()) { setEditingId(null); return; }
+    onEditTask(editingId, editText.trim());
+    setEditingId(null);
+    setEditText("");
+  };
+
   return (
     <Card className={cn("border-zinc-800 backdrop-blur flex flex-col", colors.bg)}>
       <div className="p-4 pb-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className={cn("inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-bold uppercase", colors.chip)}>{cat.name}</span>
-            <span className="text-xs text-zinc-400">{cat.doneCount}/{cat.dailyTarget} done</span>
+            <span className="text-xs text-zinc-400">{cat.doneCount}/{cat.tasks.length} done</span>
           </div>
           <Button size="icon" variant="ghost" className="h-6 w-6 text-zinc-500 hover:text-rose-400" onClick={onDeleteCategory}>
             <Trash2 className="h-3 w-3" />
@@ -1136,16 +1171,44 @@ function CategoryCard({
 
       <div className="flex-1 px-4 pb-2">
         <div className="flex flex-col gap-1 max-h-44 overflow-y-auto">
-          {cat.tasks.length === 0 && <p className="text-xs text-zinc-500 py-2 text-center">No tasks yet</p>}
+          {cat.tasks.length === 0 && <p className="text-xs text-zinc-500 py-2 text-center">No tasks yet — add one below</p>}
           {cat.tasks.map((t) => (
             <div key={t.id} className="group flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-zinc-800/50">
               <button onClick={() => onToggle(t.id)} className="shrink-0">
                 {t.done ? <CheckCircle2 className={cn("h-4 w-4", colors.text)} /> : <Circle className="h-4 w-4 text-zinc-600 hover:text-zinc-400" />}
               </button>
-              <span className={cn("text-sm flex-1 truncate", t.done ? "line-through text-zinc-500" : "text-zinc-200")}>{t.title}</span>
-              <button onClick={() => onDeleteTask(t.id)} className="opacity-0 group-hover:opacity-100 transition-opacity">
-                <X className="h-3 w-3 text-zinc-500 hover:text-rose-400" />
-              </button>
+              {editingId === t.id ? (
+                <Input
+                  autoFocus
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") { setEditingId(null); setEditText(""); } }}
+                  className="h-7 flex-1 text-sm bg-zinc-800 border-zinc-700"
+                />
+              ) : (
+                <span
+                  onDoubleClick={() => startEdit(t.id, t.title)}
+                  className={cn("text-sm flex-1 truncate cursor-text", t.done ? "line-through text-zinc-500" : "text-zinc-200")}
+                  title="Double-click to edit"
+                >{t.title}</span>
+              )}
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                {editingId === t.id ? (
+                  <>
+                    <button onClick={saveEdit} className="text-emerald-400 hover:text-emerald-300"><Check className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => { setEditingId(null); setEditText(""); }} className="text-zinc-500 hover:text-zinc-300"><X className="h-3.5 w-3.5" /></button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => startEdit(t.id, t.title)} className="text-zinc-500 hover:text-violet-300" title="Edit">
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button onClick={() => onDeleteTask(t.id)} className="text-zinc-500 hover:text-rose-400">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -1177,10 +1240,9 @@ function CategoryCard({
 
 function AddCategoryDialog({ open, onOpenChange, onSubmit }: { open: boolean; onOpenChange: (o: boolean) => void; onSubmit: (b: Record<string, unknown>) => void }) {
   const [name, setName] = React.useState("");
-  const [target, setTarget] = React.useState("5");
   const [color, setColor] = React.useState("violet");
 
-  React.useEffect(() => { if (open) { setName(""); setTarget("5"); setColor("violet"); } }, [open]);
+  React.useEffect(() => { if (open) { setName(""); setColor("violet"); } }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1189,11 +1251,7 @@ function AddCategoryDialog({ open, onOpenChange, onSubmit }: { open: boolean; on
         <div className="flex flex-col gap-3 py-2">
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-zinc-400">Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. YouTube, Newsletter..." className="bg-zinc-800 border-zinc-700" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-zinc-400">Daily target (tasks per day)</Label>
-            <Input type="number" min={1} value={target} onChange={(e) => setTarget(e.target.value)} className="bg-zinc-800 border-zinc-700" />
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pinterest, Blog, Money, Gym..." className="bg-zinc-800 border-zinc-700" autoFocus />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-zinc-400">Color</Label>
@@ -1203,10 +1261,11 @@ function AddCategoryDialog({ open, onOpenChange, onSubmit }: { open: boolean; on
               ))}
             </div>
           </div>
+          <p className="text-[11px] text-zinc-500">You can add tasks inside the category after creating it. Progress is calculated from tasks done vs total tasks.</p>
         </div>
         <DialogFooter>
           <Button variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-200" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button className="bg-violet-600 hover:bg-violet-500 text-white" disabled={!name} onClick={() => onSubmit({ name, dailyTarget: parseInt(target) || 5, color })}>Add Category</Button>
+          <Button className="bg-violet-600 hover:bg-violet-500 text-white" disabled={!name} onClick={() => onSubmit({ name, color })}>Add Category</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

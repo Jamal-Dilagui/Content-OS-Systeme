@@ -21,14 +21,15 @@ export async function GET() {
   const accountsDone = store.accounts.filter((a) => a.doneThisCycle).length;
   const cycleNumber = store.accounts[0]?.cycle ?? 1;
 
-  // Categories with tasks + progress (DYNAMIC — any number of categories)
+  // Categories with tasks + progress (DYNAMIC — pct = done/total tasks, no dailyTarget)
   const categories = store.categories.map((c) => {
     const catTasks = store.tasks.filter((t) => t.categoryId === c.id);
     const doneCount = catTasks.filter((t) => t.done).length;
-    const pct = c.dailyTarget > 0 ? Math.min(100, Math.round((doneCount / c.dailyTarget) * 100)) : 0;
+    const total = catTasks.length;
+    const pct = total > 0 ? Math.min(100, Math.round((doneCount / total) * 100)) : 0;
     return {
-      id: c.id, name: c.name, dailyTarget: c.dailyTarget, color: c.color, icon: c.icon,
-      doneCount, remaining: Math.max(0, c.dailyTarget - doneCount), pct,
+      id: c.id, name: c.name, dailyTarget: total, color: c.color, icon: c.icon,
+      doneCount, remaining: Math.max(0, total - doneCount), pct,
       tasks: catTasks.map((t) => ({ id: t.id, title: t.title, done: t.done })),
     };
   });
