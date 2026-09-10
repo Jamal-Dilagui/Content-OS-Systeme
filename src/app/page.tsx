@@ -221,6 +221,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   const [addCatOpen, setAddCatOpen] = React.useState(false);
   const [manageAccOpen, setManageAccOpen] = React.useState(false);
   const [addObjOpen, setAddObjOpen] = React.useState(false);
+  const [accSwitcherOpen, setAccSwitcherOpen] = React.useState(false);
   const [chartView, setChartView] = React.useState<"weekly" | "monthly">("weekly");
   // localData is the SOLE source of truth for the UI (query is disabled after first load)
   const [localData, setLocalData] = React.useState<TodayData | undefined>(queryData);
@@ -727,62 +728,136 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
           </div>
         </Card>
 
-        {/* ============ 2. PINTEREST — SIMPLER, CLEARER ============ */}
-        <Card className="mb-5 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
-          <div className="flex items-center gap-2 mb-4">
-            <ImageIcon className="h-5 w-5 text-violet-400" />
-            <h2 className="text-sm font-bold">Pinterest</h2>
-            <Badge variant="outline" className="ml-auto border-zinc-700 text-zinc-400 text-[10px]">Cycle {data?.pinterest.cycleNumber ?? 1} · {data?.pinterest.accountsDone ?? 0}/{data?.pinterest.totalAccounts ?? 0}</Badge>
-            <Button size="sm" variant="ghost" className="h-7 text-zinc-400 hover:text-zinc-200 text-xs px-2" onClick={() => setManageAccOpen(true)}><Settings className="h-3 w-3" /></Button>
-          </div>
-          {isLoading ? <Skeleton className="h-20 bg-zinc-800" /> : data?.pinterest.accountOfDay ? (
-            <div className="flex flex-col gap-3">
-              {/* Account name + progress in one row */}
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase text-zinc-500 font-medium">Working on</p>
-                  <p className="text-xl font-bold truncate">{data.pinterest.accountOfDay.name}</p>
+        {/* ============ 2. PINTEREST (50%) + EXECUTION STATES (50%) ============ */}
+        <div className="mb-5 grid gap-4 lg:grid-cols-2">
+          {/* LEFT: Pinterest — simple select + checkbox */}
+          <Card className="border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
+            <div className="flex items-center gap-2 mb-4">
+              <ImageIcon className="h-5 w-5 text-violet-400" />
+              <h2 className="text-sm font-bold">Pinterest</h2>
+              <Badge variant="outline" className="ml-auto border-zinc-700 text-zinc-400 text-[10px]">Cycle {data?.pinterest.cycleNumber ?? 1} · {data?.pinterest.accountsDone ?? 0}/{data?.pinterest.totalAccounts ?? 0}</Badge>
+              <Button size="sm" variant="ghost" className="h-7 text-zinc-400 hover:text-zinc-200 px-2" onClick={() => setManageAccOpen(true)}><Settings className="h-3.5 w-3.5" /></Button>
+            </div>
+            {isLoading ? <Skeleton className="h-32 bg-zinc-800" /> : (
+              <div className="flex flex-col gap-3">
+                {/* Select dropdown to choose account */}
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-[10px] uppercase text-zinc-500 font-medium">Account of the day</Label>
+                  {data!.pinterest.accountOfDay ? (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2">
+                      <span className="text-sm font-semibold text-violet-200 truncate">{data!.pinterest.accountOfDay.name}</span>
+                      <button onClick={() => setAccSwitcherOpen(!accSwitcherOpen)} className="text-[10px] text-violet-300 hover:text-violet-100 underline shrink-0">change</button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-500 py-2 text-center">All accounts done! 🎉</p>
+                  )}
+                  {accSwitcherOpen && (
+                    <div className="flex flex-col gap-1 rounded-lg border border-zinc-700 bg-zinc-800/80 p-1.5 max-h-40 overflow-y-auto">
+                      {data!.pinterest.accounts.filter((a) => !a.done).map((a) => (
+                        <button key={a.id} onClick={() => { selectAccount.mutate(a.id); setAccSwitcherOpen(false); }} className="text-left text-xs text-zinc-300 hover:bg-violet-500/10 hover:text-violet-200 rounded px-2 py-1.5 transition-colors">{a.name}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-[10px] uppercase text-zinc-500 font-medium">Pins</p>
-                  <p className="text-xl font-bold tabular-nums text-violet-300">{data.pinterest.accountOfDay.pinsCompleted}/{data.pinterest.accountOfDay.pinsPerBatch}</p>
-                </div>
+
+                {/* Pin counter — simple */}
+                {data!.pinterest.accountOfDay && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-2xl font-bold tabular-nums text-violet-300">{data!.pinterest.accountOfDay.pinsCompleted}<span className="text-sm text-zinc-500">/{data!.pinterest.accountOfDay.pinsPerBatch}</span></span>
+                      <span className="text-xs text-zinc-500">pins</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+                      <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300" style={{ width: `${data!.pinterest.pct}%` }} />
+                    </div>
+                    {/* Minimal buttons: −, +1, +5, Fill */}
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => addPin.mutate({ id: data!.pinterest.accountOfDay!.id, delta: -1 })} disabled={data!.pinterest.accountOfDay.pinsCompleted === 0} className="h-8 w-8 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"><Minus className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => addPin.mutate({ id: data!.pinterest.accountOfDay!.id, delta: 1 })} disabled={data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch} className="flex-1 h-8 rounded-lg border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed">+1 Pin</button>
+                      <button onClick={() => addPin.mutate({ id: data!.pinterest.accountOfDay!.id, delta: 5 })} disabled={data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch} className="h-8 px-2 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 text-xs">+5</button>
+                      <button onClick={() => addPin.mutate({ id: data!.pinterest.accountOfDay!.id, delta: data!.pinterest.accountOfDay!.pinsPerBatch - data!.pinterest.accountOfDay!.pinsCompleted })} disabled={data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch} className="h-8 px-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 disabled:opacity-30 text-xs font-medium">Fill</button>
+                    </div>
+                    {/* Done checkbox */}
+                    <label className="flex items-center gap-2 cursor-pointer mt-1 rounded-lg border border-zinc-700 bg-zinc-800/40 px-3 py-2 hover:border-emerald-500/30 transition-colors" onClick={() => doneAccount.mutate(data!.pinterest.accountOfDay!.id)}>
+                      <span className={cn("flex h-5 w-5 items-center justify-center rounded border-2 transition-all", data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch ? "border-emerald-500 bg-emerald-500" : "border-zinc-600")}>
+                        {data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch && <Check className="h-3 w-3 text-white" />}
+                      </span>
+                      <span className="text-sm text-zinc-300">Mark account as done</span>
+                    </label>
+                  </>
+                )}
+
+                {/* Completed accounts — grayed out */}
+                {data!.pinterest.accounts.filter((a) => a.done).length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-zinc-800">
+                    <p className="text-[10px] uppercase text-zinc-600 font-bold mb-1.5">Completed ({data!.pinterest.accounts.filter(a => a.done).length})</p>
+                    <div className="flex flex-col gap-1">
+                      {data!.pinterest.accounts.filter((a) => a.done).map((a) => (
+                        <div key={a.id} className="flex items-center gap-2 text-xs text-zinc-600 opacity-60">
+                          <CheckCircle2 className="h-3 w-3 text-emerald-600" /><span className="line-through flex-1 truncate">{a.name}</span>
+                          <button onClick={() => unlockAccount.mutate(a.id)} title="Unlock" className="hover:opacity-100 hover:text-violet-400">🔓</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              {/* Progress bar */}
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-800">
-                <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300" style={{ width: `${data.pinterest.pct}%` }} />
-              </div>
-              {/* Actions: quick add + mark done */}
+            )}
+          </Card>
+
+          {/* RIGHT: Execution States — chart + daily states */}
+          <Card className="border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
+            <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: -1 })} disabled={data.pinterest.accountOfDay.pinsCompleted === 0} className="h-9 w-9 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-rose-400 hover:border-rose-500/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center"><Minus className="h-4 w-4" /></button>
-                <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 1 })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="flex-1 h-9 rounded-lg border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 font-medium text-sm disabled:opacity-30 disabled:cursor-not-allowed transition-colors">+1 Pin</button>
-                <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 5 })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="h-9 px-3 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-sm transition-colors">+5</button>
-                <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 10 })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="h-9 px-3 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-sm transition-colors">+10</button>
-                <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: data.pinterest.accountOfDay!.pinsPerBatch - data.pinterest.accountOfDay!.pinsCompleted })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="h-9 px-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 font-medium text-sm disabled:opacity-30 disabled:cursor-not-allowed transition-colors">Fill</button>
-                <Button size="sm" className="h-9 bg-emerald-600 hover:bg-emerald-500 text-white px-3" disabled={doneAccount.isPending} onClick={() => doneAccount.mutate(data.pinterest.accountOfDay!.id)}><CheckCircle2 className="h-4 w-4" /> Done</Button>
+                <Activity className="h-5 w-5 text-violet-400" />
+                <h2 className="text-sm font-bold">Execution States</h2>
               </div>
-              {/* Account chips */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {data.pinterest.accounts.map((a) => {
-                  const isCurrent = a.id === data.pinterest.accountOfDay?.id;
-                  if (a.done) {
+              {!isLoading && data && (
+                <div className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800/50 p-0.5">
+                  <button onClick={() => setChartView("weekly")} className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "weekly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>Weekly</button>
+                  <button onClick={() => setChartView("monthly")} className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "monthly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>Monthly</button>
+                </div>
+              )}
+            </div>
+            {isLoading || !data ? <Skeleton className="h-48 bg-zinc-800" /> : data.categories.length === 0 ? (
+              <div className="h-48 flex flex-col items-center justify-center text-center gap-2">
+                <Activity className="h-8 w-8 text-zinc-700" />
+                <p className="text-sm text-zinc-500">Add categories to see chart</p>
+              </div>
+            ) : (
+              <DynamicChart data={chartView === "weekly" ? data.history : data.monthlyHistory} categories={data.categories} view={chartView} />
+            )}
+            {/* Daily states dots */}
+            {!isLoading && data && (
+              <div className="mt-3 pt-3 border-t border-zinc-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] uppercase font-bold text-zinc-500">Last 7 days</span>
+                  <div className="flex items-center gap-2 text-[9px] text-zinc-500">
+                    <span className="flex items-center gap-0.5"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> ok</span>
+                    <span className="flex items-center gap-0.5"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> mid</span>
+                    <span className="flex items-center gap-0.5"><span className="h-1.5 w-1.5 rounded-full bg-zinc-600" /> none</span>
+                  </div>
+                </div>
+                <div key={"daily-" + JSON.stringify(data.history[data.history.length-1] || {})} className="flex items-center justify-between gap-1">
+                  {data.history.map((h, i) => {
+                    const values = [Number(h.pinterest) || 0, ...data.categories.map((c) => Number(h[c.name]) || 0)];
+                    const avg = values.length > 0 ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
+                    const isToday = i === data.history.length - 1;
+                    const state = avg >= 90 ? "perfect" : avg >= 30 ? "partial" : "none";
+                    const dotColor = state === "perfect" ? "bg-emerald-500" : state === "partial" ? "bg-amber-500" : "bg-zinc-600";
                     return (
-                      <div key={a.id} className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800/30 px-2 py-1 text-[10px] font-medium text-zinc-500">
-                        <Lock className="h-2.5 w-2.5" />{a.name}
-                        <button onClick={() => unlockAccount.mutate(a.id)} title="Unlock" className="ml-0.5 hover:scale-110 transition-transform">🔓</button>
+                      <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                        <span className="text-[9px] text-zinc-500">{String(h.label)}</span>
+                        <span className={cn("h-7 w-7 rounded-full transition-all", dotColor, isToday && "ring-2 ring-violet-400 ring-offset-1 ring-offset-zinc-900")} />
+                        <span className={cn("text-[9px] font-bold", state === "perfect" ? "text-emerald-400" : state === "partial" ? "text-amber-400" : "text-zinc-500")}>{avg}%</span>
                       </div>
                     );
-                  }
-                  return (
-                    <button key={a.id} disabled={isCurrent} onClick={() => selectAccount.mutate(a.id)} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium border transition-all", isCurrent ? "border-violet-500/50 bg-violet-500/15 text-violet-200" : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-violet-500/40 hover:text-violet-200")}>
-                      {isCurrent ? <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" /> : <Circle className="h-2 w-2" />}{a.name}
-                    </button>
-                  );
-                })}
+                  })}
+                </div>
               </div>
-            </div>
-          ) : <p className="text-zinc-400 text-sm">No account available.</p>}
-        </Card>
+            )}
+          </Card>
+        </div>
 
         {/* ============ 3. CATEGORIES (TASKS STATES) ============ */}
         <div className="mb-5">
@@ -861,59 +936,6 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
           </div>
         </div>
 
-        {/* ============ 5. EXECUTION STATES (chart + daily states) ============ */}
-        <Card className="mb-5 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Activity className="h-5 w-5 text-violet-400" />
-              <h2 className="text-sm font-bold">Execution States</h2>
-            </div>
-            {!isLoading && data && (
-              <div className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800/50 p-0.5">
-                <button onClick={() => setChartView("weekly")} className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "weekly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>Weekly</button>
-                <button onClick={() => setChartView("monthly")} className={cn("px-2.5 py-1 text-[11px] font-medium rounded-md transition-all", chartView === "monthly" ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200")}>Monthly</button>
-              </div>
-            )}
-          </div>
-          {isLoading || !data ? <Skeleton className="h-56 bg-zinc-800" /> : data.categories.length === 0 ? (
-            <div className="h-56 flex flex-col items-center justify-center text-center gap-2">
-              <Activity className="h-8 w-8 text-zinc-700" />
-              <p className="text-sm text-zinc-500">Add categories to see your progress chart</p>
-            </div>
-          ) : (
-            <DynamicChart data={chartView === "weekly" ? data.history : data.monthlyHistory} categories={data.categories} view={chartView} />
-          )}
-          {/* Daily states dots */}
-          {!isLoading && data && (
-            <div className="mt-4 pt-4 border-t border-zinc-800">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] uppercase font-bold text-zinc-500">Last 7 days</span>
-                <div className="flex items-center gap-3 text-[10px] text-zinc-500">
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> perfect</span>
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> partial</span>
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-zinc-600" /> none</span>
-                </div>
-              </div>
-              <div key={"daily-" + JSON.stringify(data.history[data.history.length-1] || {})} className="flex items-center justify-between gap-1.5">
-                {data.history.map((h, i) => {
-                  const values = [Number(h.pinterest) || 0, ...data.categories.map((c) => Number(h[c.name]) || 0)];
-                  const avg = values.length > 0 ? Math.round(values.reduce((s, v) => s + v, 0) / values.length) : 0;
-                  const isToday = i === data.history.length - 1;
-                  const state = avg >= 90 ? "perfect" : avg >= 30 ? "partial" : "none";
-                  const dotColor = state === "perfect" ? "bg-emerald-500" : state === "partial" ? "bg-amber-500" : "bg-zinc-600";
-                  return (
-                    <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
-                      <span className="text-[10px] text-zinc-500 font-medium">{String(h.label)}</span>
-                      <span className={cn("h-8 w-8 rounded-full flex items-center justify-center transition-all", dotColor, isToday && "ring-2 ring-violet-400 ring-offset-2 ring-offset-zinc-900")} />
-                      <span className={cn("text-[10px] font-bold", state === "perfect" ? "text-emerald-400" : state === "partial" ? "text-amber-400" : "text-zinc-500")}>{avg}%</span>
-                      {isToday && <span className="text-[9px] text-violet-300 font-bold">TODAY</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </Card>
 
         {/* ============ 6. REMINDERS + REWARDS ============ */}
         <div className="mb-5 grid gap-4 sm:grid-cols-2">
