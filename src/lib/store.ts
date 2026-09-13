@@ -67,6 +67,7 @@ type Store = {
   logs: DailyLog[];
   streak: Streak;
   initialized: boolean;
+  lastResetDate: string | null; // ISO date of last daily reset
 };
 
 const globalStore = globalThis as unknown as { __contentOSStore?: Store };
@@ -113,6 +114,7 @@ function seed(): Store {
     logs,
     streak: { id: "streak-1", currentStreak: 0, longestStreak: 0, lastActiveDate: null, totalDays: 0, rewards: 0 },
     initialized: true,
+    lastResetDate: null,
   };
 }
 

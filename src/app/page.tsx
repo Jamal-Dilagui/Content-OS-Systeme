@@ -22,7 +22,7 @@ import {
 import {
   CheckCircle2, Circle, Plus, Minus, Image as ImageIcon, Sparkles, Flame, Trophy,
   Bell, Target, Plus as PlusIcon, Trash2, X, Check, Lock, Settings, Pencil, RotateCcw, LogOut,
-  Activity, TrendingUp,
+  Activity, TrendingUp, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { login, logout, getSession, type Session } from "@/lib/auth";
@@ -624,8 +624,21 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   });
 
   // Pre-warm all API routes on mount so the first action doesn't trigger compilation
+  // + Daily reset: uncheck all tasks if it's a new day (saves yesterday's progress first)
   React.useEffect(() => {
     const warm = async () => {
+      // Call daily reset first — saves yesterday's progress + unchecks tasks
+      try {
+        const resetRes = await fetch("/api/daily-reset", { method: "POST" });
+        const resetData = await resetRes.json();
+        if (resetData.reset) {
+          // If reset happened, force fresh fetch from server
+          try { localStorage.removeItem(STORAGE_KEY); } catch {}
+          await qc.invalidateQueries({ queryKey: ["today"] });
+          setLocalData(undefined);
+        }
+      } catch {}
+
       await Promise.allSettled([
         fetch("/api/today"),
         fetch("/api/categories"),
@@ -936,6 +949,35 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
           </div>
         </div>
 
+        {/* ============ 5.5 TASKS NOT COMPLETED (board) ============ */}
+        {!isLoading && data && data.categories.some((c) => c.tasks.some((t) => !t.done)) && (
+          <Card className="mb-5 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
+            <div className="flex items-center gap-2 mb-3">
+              <Clock className="h-5 w-5 text-amber-400" />
+              <h2 className="text-sm font-bold">Tasks Not Completed</h2>
+              <span className="text-xs text-zinc-500">({data.categories.reduce((s, c) => s + c.tasks.filter((t) => !t.done).length, 0)} remaining)</span>
+            </div>
+            <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
+              {data.categories.map((c) => {
+                const undone = c.tasks.filter((t) => !t.done);
+                if (undone.length === 0) return null;
+                const colors = COLOR_MAP[c.color] ?? COLOR_MAP.violet;
+                return (
+                  <div key={c.id} className="flex items-center gap-2">
+                    <span className={cn("inline-flex h-5 items-center rounded border px-1.5 text-[9px] font-bold uppercase shrink-0", colors.chip)}>{c.name}</span>
+                    <div className="flex flex-wrap gap-1.5 flex-1">
+                      {undone.map((t) => (
+                        <span key={t.id} className="inline-flex items-center gap-1 rounded-md bg-zinc-800/60 px-2 py-1 text-[11px] text-zinc-400">
+                          <Circle className="h-2.5 w-2.5 text-zinc-600" /> {t.title}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         {/* ============ 6. REMINDERS + REWARDS ============ */}
         <div className="mb-5 grid gap-4 sm:grid-cols-2">
