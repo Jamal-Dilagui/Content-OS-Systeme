@@ -732,7 +732,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
             </div>
             <div className="rounded-lg bg-zinc-800/40 p-2.5">
               <p className="text-[10px] uppercase text-zinc-500 font-medium">Objectives</p>
-              <p className="text-lg font-bold text-emerald-300 tabular-nums">{data?.objectives.filter(o => o.achieved).length ?? 0}/{data?.objectives.length ?? 0}</p>
+              <p className="text-lg font-bold text-emerald-300 tabular-nums">{(data?.objectives ?? []).filter(o => o.achieved).length}/{(data?.objectives ?? []).length}</p>
             </div>
             <div className="rounded-lg bg-zinc-800/40 p-2.5">
               <p className="text-[10px] uppercase text-zinc-500 font-medium">Streak</p>
@@ -751,14 +751,14 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
               <Badge variant="outline" className="ml-auto border-zinc-700 text-zinc-400 text-[10px]">Cycle {data?.pinterest.cycleNumber ?? 1} · {data?.pinterest.accountsDone ?? 0}/{data?.pinterest.totalAccounts ?? 0}</Badge>
               <Button size="sm" variant="ghost" className="h-7 text-zinc-400 hover:text-zinc-200 px-2" onClick={() => setManageAccOpen(true)}><Settings className="h-3.5 w-3.5" /></Button>
             </div>
-            {isLoading ? <Skeleton className="h-32 bg-zinc-800" /> : (
+            {isLoading || !data ? <Skeleton className="h-32 bg-zinc-800" /> : (
               <div className="flex flex-col gap-3">
                 {/* Select dropdown to choose account */}
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-[10px] uppercase text-zinc-500 font-medium">Account of the day</Label>
-                  {data!.pinterest.accountOfDay ? (
+                  {data.pinterest.accountOfDay ? (
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2">
-                      <span className="text-sm font-semibold text-violet-200 truncate">{data!.pinterest.accountOfDay.name}</span>
+                      <span className="text-sm font-semibold text-violet-200 truncate">{data.pinterest.accountOfDay.name}</span>
                       <button onClick={() => setAccSwitcherOpen(!accSwitcherOpen)} className="text-[10px] text-violet-300 hover:text-violet-100 underline shrink-0">change</button>
                     </div>
                   ) : (
@@ -766,7 +766,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
                   )}
                   {accSwitcherOpen && (
                     <div className="flex flex-col gap-1 rounded-lg border border-zinc-700 bg-zinc-800/80 p-1.5 max-h-40 overflow-y-auto">
-                      {data!.pinterest.accounts.filter((a) => !a.done).map((a) => (
+                      {data.pinterest.accounts.filter((a) => !a.done).map((a) => (
                         <button key={a.id} onClick={() => { selectAccount.mutate(a.id); setAccSwitcherOpen(false); }} className="text-left text-xs text-zinc-300 hover:bg-violet-500/10 hover:text-violet-200 rounded px-2 py-1.5 transition-colors">{a.name}</button>
                       ))}
                     </div>
@@ -774,26 +774,26 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
                 </div>
 
                 {/* Pin counter — simple */}
-                {data!.pinterest.accountOfDay && (
+                {data.pinterest.accountOfDay && (
                   <>
                     <div className="flex items-center justify-between">
-                      <span className="text-2xl font-bold tabular-nums text-violet-300">{data!.pinterest.accountOfDay.pinsCompleted}<span className="text-sm text-zinc-500">/{data!.pinterest.accountOfDay.pinsPerBatch}</span></span>
+                      <span className="text-2xl font-bold tabular-nums text-violet-300">{data.pinterest.accountOfDay.pinsCompleted}<span className="text-sm text-zinc-500">/{data.pinterest.accountOfDay.pinsPerBatch}</span></span>
                       <span className="text-xs text-zinc-500">pins</span>
                     </div>
                     <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
-                      <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300" style={{ width: `${data!.pinterest.pct}%` }} />
+                      <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300" style={{ width: `${data.pinterest.pct}%` }} />
                     </div>
                     {/* Minimal buttons: −, +1, +5, Fill */}
                     <div className="flex items-center gap-1.5">
-                      <button onClick={() => addPin.mutate({ id: data!.pinterest.accountOfDay!.id, delta: -1 })} disabled={data!.pinterest.accountOfDay.pinsCompleted === 0} className="h-8 w-8 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"><Minus className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => addPin.mutate({ id: data!.pinterest.accountOfDay!.id, delta: 1 })} disabled={data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch} className="flex-1 h-8 rounded-lg border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed">+1 Pin</button>
-                      <button onClick={() => addPin.mutate({ id: data!.pinterest.accountOfDay!.id, delta: 5 })} disabled={data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch} className="h-8 px-2 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 text-xs">+5</button>
-                      <button onClick={() => addPin.mutate({ id: data!.pinterest.accountOfDay!.id, delta: data!.pinterest.accountOfDay!.pinsPerBatch - data!.pinterest.accountOfDay!.pinsCompleted })} disabled={data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch} className="h-8 px-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 disabled:opacity-30 text-xs font-medium">Fill</button>
+                      <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: -1 })} disabled={data.pinterest.accountOfDay.pinsCompleted === 0} className="h-8 w-8 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"><Minus className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 1 })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="flex-1 h-8 rounded-lg border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed">+1 Pin</button>
+                      <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 5 })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="h-8 px-2 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 text-xs">+5</button>
+                      <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: data.pinterest.accountOfDay!.pinsPerBatch - data.pinterest.accountOfDay!.pinsCompleted })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="h-8 px-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 disabled:opacity-30 text-xs font-medium">Fill</button>
                     </div>
                     {/* Done checkbox */}
-                    <label className="flex items-center gap-2 cursor-pointer mt-1 rounded-lg border border-zinc-700 bg-zinc-800/40 px-3 py-2 hover:border-emerald-500/30 transition-colors" onClick={() => doneAccount.mutate(data!.pinterest.accountOfDay!.id)}>
-                      <span className={cn("flex h-5 w-5 items-center justify-center rounded border-2 transition-all", data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch ? "border-emerald-500 bg-emerald-500" : "border-zinc-600")}>
-                        {data!.pinterest.accountOfDay.pinsCompleted >= data!.pinterest.accountOfDay.pinsPerBatch && <Check className="h-3 w-3 text-white" />}
+                    <label className="flex items-center gap-2 cursor-pointer mt-1 rounded-lg border border-zinc-700 bg-zinc-800/40 px-3 py-2 hover:border-emerald-500/30 transition-colors" onClick={() => doneAccount.mutate(data.pinterest.accountOfDay!.id)}>
+                      <span className={cn("flex h-5 w-5 items-center justify-center rounded border-2 transition-all", data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch ? "border-emerald-500 bg-emerald-500" : "border-zinc-600")}>
+                        {data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch && <Check className="h-3 w-3 text-white" />}
                       </span>
                       <span className="text-sm text-zinc-300">Mark account as done</span>
                     </label>
@@ -801,11 +801,11 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
                 )}
 
                 {/* Completed accounts — grayed out */}
-                {data!.pinterest.accounts.filter((a) => a.done).length > 0 && (
+                {data.pinterest.accounts.filter((a) => a.done).length > 0 && (
                   <div className="mt-2 pt-2 border-t border-zinc-800">
-                    <p className="text-[10px] uppercase text-zinc-600 font-bold mb-1.5">Completed ({data!.pinterest.accounts.filter(a => a.done).length})</p>
+                    <p className="text-[10px] uppercase text-zinc-600 font-bold mb-1.5">Completed ({data.pinterest.accounts.filter(a => a.done).length})</p>
                     <div className="flex flex-col gap-1">
-                      {data!.pinterest.accounts.filter((a) => a.done).map((a) => (
+                      {data.pinterest.accounts.filter((a) => a.done).map((a) => (
                         <div key={a.id} className="flex items-center gap-2 text-xs text-zinc-600 opacity-60">
                           <CheckCircle2 className="h-3 w-3 text-emerald-600" /><span className="line-through flex-1 truncate">{a.name}</span>
                           <button onClick={() => unlockAccount.mutate(a.id)} title="Unlock" className="hover:opacity-100 hover:text-violet-400">🔓</button>
@@ -988,7 +988,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
             </div>
             {isLoading ? <Skeleton className="h-32 bg-zinc-800" /> : (
               <div className="flex flex-col gap-2">
-                {data!.reminders.map((r, i) => (
+                {(data?.reminders ?? []).map((r, i) => (
                   <div key={i} className={cn("flex items-start gap-2 rounded-lg border p-2.5 text-sm",
                     r.severity === "good" ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300" :
                     r.severity === "warn" ? "border-amber-500/30 bg-amber-500/5 text-amber-300" :
@@ -1007,7 +1007,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
             </div>
             {isLoading ? <Skeleton className="h-32 bg-zinc-800" /> : (
               <div className="grid grid-cols-1 gap-2">
-                {data!.rewards.map((rw, i) => (
+                {(data?.rewards ?? []).map((rw, i) => (
                   <div key={i} className={cn("flex items-center gap-3 rounded-lg border p-2.5", rw.unlocked ? "border-amber-500/30 bg-amber-500/5" : "border-zinc-800 bg-zinc-800/30 opacity-50")}>
                     <span className="text-xl">{rw.icon}</span>
                     <div className="flex-1 min-w-0">
