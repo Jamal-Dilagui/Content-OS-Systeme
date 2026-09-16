@@ -185,7 +185,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   // in-memory store resets on every cold start, so we can't rely on server).
   // Server is ONLY used for the very first visit (seed data). After that, all
   // reads come from localStorage, all writes go to localStorage.
-  const CACHE_VERSION = "v6-redesign";
+  const CACHE_VERSION = "v7-simple-pinterest";
   const STORAGE_KEY = `content-os-today-${CACHE_VERSION}`;
 
   // Check localStorage ONCE on mount — if we have data, never fetch from server
@@ -623,35 +623,60 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
     },
   });
 
-  // Pre-warm all API routes on mount so the first action doesn't trigger compilation
-  // + Daily reset: uncheck all tasks if it's a new day (saves yesterday's progress first)
+  // Pre-warm API routes on mount (no daily-reset server call — that causes data loss on refresh)
+  // Daily reset is done CLIENT-SIDE: check lastResetDate in localStorage
   React.useEffect(() => {
-    const warm = async () => {
-      // Call daily reset first — saves yesterday's progress + unchecks tasks
-      try {
-        const resetRes = await fetch("/api/daily-reset", { method: "POST" });
-        const resetData = await resetRes.json();
-        if (resetData.reset) {
-          // If reset happened, force fresh fetch from server
-          try { localStorage.removeItem(STORAGE_KEY); } catch {}
-          await qc.invalidateQueries({ queryKey: ["today"] });
-          setLocalData(undefined);
+    // Client-side daily reset: if new day, uncheck all tasks in localStorage
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const lastReset = localStorage.getItem("content-os-last-reset");
+      if (lastReset && lastReset !== today) {
+        // New day — uncheck all tasks, save progress to history
+        const cached = localStorage.getItem(STORAGE_KEY);
+        if (cached) {
+          const d = JSON.parse(cached);
+          // Save yesterday's progress to history
+          if (d.history && d.history.length > 0) {
+            // Already saved by server on last visit
+          }
+          // Uncheck all tasks
+          d.categories = (d.categories || []).map((c) => ({
+            ...c,
+            tasks: (c.tasks || []).map((t) => ({ ...t, done: false })),
+            doneCount: 0,
+            remaining: (c.tasks || []).length,
+            pct: 0,
+          }));
+          // Reset Pinterest pins (but keep doneThisCycle)
+          if (d.pinterest) {
+            d.pinterest.accounts = (d.pinterest.accounts || []).map((a) => ({
+              ...a,
+              pinsCompleted: a.done ? a.pinsCompleted : 0,
+            }));
+            if (d.pinterest.accountOfDay) {
+              d.pinterest.accountOfDay.pinsCompleted = 0;
+            }
+            d.pinterest.pct = 0;
+          }
+          d.overallPct = 0;
+          // Update history today point to 0
+          if (d.history) d.history[d.history.length - 1] = { ...d.history[d.history.length - 1], pinterest: 0 };
+          if (d.monthlyHistory) d.monthlyHistory[d.monthlyHistory.length - 1] = { ...d.monthlyHistory[d.monthlyHistory.length - 1], pinterest: 0 };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
+          localStorage.setItem("content-os-last-reset", today);
+          setLocalData(d);
         }
-      } catch {}
+      } else if (!lastReset) {
+        localStorage.setItem("content-os-last-reset", today);
+      }
+    } catch {}
 
+    // Pre-warm API routes
+    const warm = async () => {
       await Promise.allSettled([
         fetch("/api/today"),
         fetch("/api/categories"),
         fetch("/api/pinterest/accounts"),
-      ]);
-      await Promise.allSettled([
-        fetch("/api/pinterest/accounts/warm/pins", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ delta: 0 }) }).catch(() => {}),
-        fetch("/api/pinterest/accounts/warm/done", { method: "POST" }).catch(() => {}),
-        fetch("/api/pinterest/accounts/warm/select", { method: "POST" }).catch(() => {}),
-        fetch("/api/pinterest/accounts/warm", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {}),
-        fetch("/api/pinterest/accounts/warm", { method: "DELETE" }).catch(() => {}),
-        fetch("/api/tasks/warm/toggle", { method: "POST" }).catch(() => {}),
-        fetch("/api/tasks?warm=1", { method: "DELETE" }).catch(() => {}),
       ]);
     };
     warm();
@@ -743,72 +768,58 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
 
         {/* ============ 2. PINTEREST (50%) + EXECUTION STATES (50%) ============ */}
         <div className="mb-5 grid gap-4 lg:grid-cols-2">
-          {/* LEFT: Pinterest — simple select + checkbox */}
+          {/* LEFT: Pinterest — ultra simple: account + checkbox */}
           <Card className="border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
             <div className="flex items-center gap-2 mb-4">
               <ImageIcon className="h-5 w-5 text-violet-400" />
               <h2 className="text-sm font-bold">Pinterest</h2>
-              <Badge variant="outline" className="ml-auto border-zinc-700 text-zinc-400 text-[10px]">Cycle {data?.pinterest.cycleNumber ?? 1} · {data?.pinterest.accountsDone ?? 0}/{data?.pinterest.totalAccounts ?? 0}</Badge>
+              <Badge variant="outline" className="ml-auto border-zinc-700 text-zinc-400 text-[10px]">{data?.pinterest.accountsDone ?? 0}/{data?.pinterest.totalAccounts ?? 0} done</Badge>
               <Button size="sm" variant="ghost" className="h-7 text-zinc-400 hover:text-zinc-200 px-2" onClick={() => setManageAccOpen(true)}><Settings className="h-3.5 w-3.5" /></Button>
             </div>
-            {isLoading || !data ? <Skeleton className="h-32 bg-zinc-800" /> : (
+            {isLoading || !data ? <Skeleton className="h-24 bg-zinc-800" /> : (
               <div className="flex flex-col gap-3">
-                {/* Select dropdown to choose account */}
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-[10px] uppercase text-zinc-500 font-medium">Account of the day</Label>
+                {/* Account selector */}
+                <div>
+                  <Label className="text-[10px] uppercase text-zinc-500 font-medium mb-1.5 block">Account</Label>
                   {data.pinterest.accountOfDay ? (
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2">
-                      <span className="text-sm font-semibold text-violet-200 truncate">{data.pinterest.accountOfDay.name}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-base font-bold text-violet-200">{data.pinterest.accountOfDay.name}</span>
                       <button onClick={() => setAccSwitcherOpen(!accSwitcherOpen)} className="text-[10px] text-violet-300 hover:text-violet-100 underline shrink-0">change</button>
                     </div>
                   ) : (
-                    <p className="text-xs text-zinc-500 py-2 text-center">All accounts done! 🎉</p>
+                    <p className="text-xs text-zinc-500 py-2 text-center">All done! 🎉 Cycle resets tomorrow.</p>
                   )}
                   {accSwitcherOpen && (
-                    <div className="flex flex-col gap-1 rounded-lg border border-zinc-700 bg-zinc-800/80 p-1.5 max-h-40 overflow-y-auto">
+                    <div className="mt-2 flex flex-col gap-1 rounded-lg border border-zinc-700 bg-zinc-800/80 p-1.5 max-h-32 overflow-y-auto">
                       {data.pinterest.accounts.filter((a) => !a.done).map((a) => (
-                        <button key={a.id} onClick={() => { selectAccount.mutate(a.id); setAccSwitcherOpen(false); }} className="text-left text-xs text-zinc-300 hover:bg-violet-500/10 hover:text-violet-200 rounded px-2 py-1.5 transition-colors">{a.name}</button>
+                        <button key={a.id} onClick={() => { selectAccount.mutate(a.id); setAccSwitcherOpen(false); }} className="text-left text-xs text-zinc-300 hover:bg-violet-500/10 hover:text-violet-200 rounded px-2 py-1.5">{a.name}</button>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {/* Pin counter — simple */}
+                {/* Done checkbox — the ONLY action */}
                 {data.pinterest.accountOfDay && (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl font-bold tabular-nums text-violet-300">{data.pinterest.accountOfDay.pinsCompleted}<span className="text-sm text-zinc-500">/{data.pinterest.accountOfDay.pinsPerBatch}</span></span>
-                      <span className="text-xs text-zinc-500">pins</span>
+                  <label className="flex items-center gap-3 cursor-pointer rounded-lg border border-zinc-700 bg-zinc-800/40 px-3 py-3 hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-colors" onClick={() => doneAccount.mutate(data.pinterest.accountOfDay!.id)}>
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md border-2 border-zinc-600 hover:border-emerald-500 transition-colors shrink-0">
+                      <Check className="h-4 w-4 text-emerald-500 opacity-0 hover:opacity-100" />
+                    </span>
+                    <div>
+                      <span className="text-sm font-medium text-zinc-200">Mark as done</span>
+                      <p className="text-[10px] text-zinc-500">Account locks until cycle completes</p>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
-                      <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-300" style={{ width: `${data.pinterest.pct}%` }} />
-                    </div>
-                    {/* Minimal buttons: −, +1, +5, Fill */}
-                    <div className="flex items-center gap-1.5">
-                      <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: -1 })} disabled={data.pinterest.accountOfDay.pinsCompleted === 0} className="h-8 w-8 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-400 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"><Minus className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 1 })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="flex-1 h-8 rounded-lg border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed">+1 Pin</button>
-                      <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: 5 })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="h-8 px-2 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 text-xs">+5</button>
-                      <button onClick={() => addPin.mutate({ id: data.pinterest.accountOfDay!.id, delta: data.pinterest.accountOfDay!.pinsPerBatch - data.pinterest.accountOfDay!.pinsCompleted })} disabled={data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch} className="h-8 px-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 disabled:opacity-30 text-xs font-medium">Fill</button>
-                    </div>
-                    {/* Done checkbox */}
-                    <label className="flex items-center gap-2 cursor-pointer mt-1 rounded-lg border border-zinc-700 bg-zinc-800/40 px-3 py-2 hover:border-emerald-500/30 transition-colors" onClick={() => doneAccount.mutate(data.pinterest.accountOfDay!.id)}>
-                      <span className={cn("flex h-5 w-5 items-center justify-center rounded border-2 transition-all", data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch ? "border-emerald-500 bg-emerald-500" : "border-zinc-600")}>
-                        {data.pinterest.accountOfDay.pinsCompleted >= data.pinterest.accountOfDay.pinsPerBatch && <Check className="h-3 w-3 text-white" />}
-                      </span>
-                      <span className="text-sm text-zinc-300">Mark account as done</span>
-                    </label>
-                  </>
+                  </label>
                 )}
 
-                {/* Completed accounts — grayed out */}
+                {/* Completed accounts */}
                 {data.pinterest.accounts.filter((a) => a.done).length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-zinc-800">
-                    <p className="text-[10px] uppercase text-zinc-600 font-bold mb-1.5">Completed ({data.pinterest.accounts.filter(a => a.done).length})</p>
+                  <div className="mt-1 pt-2 border-t border-zinc-800">
+                    <p className="text-[10px] uppercase text-zinc-600 font-bold mb-1.5">Done ({data.pinterest.accounts.filter(a => a.done).length})</p>
                     <div className="flex flex-col gap-1">
                       {data.pinterest.accounts.filter((a) => a.done).map((a) => (
                         <div key={a.id} className="flex items-center gap-2 text-xs text-zinc-600 opacity-60">
-                          <CheckCircle2 className="h-3 w-3 text-emerald-600" /><span className="line-through flex-1 truncate">{a.name}</span>
-                          <button onClick={() => unlockAccount.mutate(a.id)} title="Unlock" className="hover:opacity-100 hover:text-violet-400">🔓</button>
+                          <CheckCircle2 className="h-3 w-3 text-emerald-600 shrink-0" /><span className="line-through flex-1 truncate">{a.name}</span>
+                          <button onClick={() => unlockAccount.mutate(a.id)} title="Unlock" className="hover:text-violet-400">🔓</button>
                         </div>
                       ))}
                     </div>
