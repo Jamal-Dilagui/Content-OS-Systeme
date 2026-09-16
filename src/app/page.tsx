@@ -185,7 +185,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   // in-memory store resets on every cold start, so we can't rely on server).
   // Server is ONLY used for the very first visit (seed data). After that, all
   // reads come from localStorage, all writes go to localStorage.
-  const CACHE_VERSION = "v7-simple-pinterest";
+  const CACHE_VERSION = "v8-clean-categories";
   const STORAGE_KEY = `content-os-today-${CACHE_VERSION}`;
 
   // Check localStorage ONCE on mount — if we have data, never fetch from server
@@ -420,23 +420,43 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
       fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()),
     onMutate: async (body) => {
       const tempId = `temp-cat-${Date.now()}`;
+      const taskList = (body.tasks as string[]) || [];
+      const tempTasks = taskList.map((title, i) => ({ id: `temp-task-${tempId}-${i}`, title, done: false }));
       const tempCat: Category = {
-        id: tempId, name: body.name as string, dailyTarget: (body.dailyTarget as number) || 5,
+        id: tempId, name: body.name as string, dailyTarget: taskList.length,
         color: (body.color as string) || "violet", icon: "FileText",
-        doneCount: 0, remaining: (body.dailyTarget as number) || 5, pct: 0, tasks: [],
+        doneCount: 0, remaining: taskList.length, pct: 0, tasks: tempTasks,
       };
       await qc.cancelQueries({ queryKey: ["today"] });
       updateData((prev) => recompute({ ...prev, categories: [...prev.categories, tempCat] }));
-      toast({ title: "Category added!" });
+      toast({ title: "Category added!" + (taskList.length > 0 ? ` (${taskList.length} tasks)` : "") });
       setAddCatOpen(false);
       return { tempId };
     },
-    onSuccess: (created: Category, _v, ctx) => {
+    onSuccess: async (created: Category, body, ctx) => {
       if (!ctx?.tempId) return;
+      // Create tasks on server if provided
+      const taskList = (body.tasks as string[]) || [];
+      // First update category in local state
       updateData((prev) => recompute({
         ...prev,
-        categories: prev.categories.map((c) => c.id === ctx.tempId ? { ...created, tasks: [] } : c),
+        categories: prev.categories.map((c) => c.id === ctx.tempId ? { ...created, tasks: c.tasks, doneCount: 0, remaining: c.tasks.length, pct: 0, dailyTarget: c.tasks.length } : c),
       }));
+      // Then create each task on server (background, non-blocking)
+      for (let i = 0; i < taskList.length; i++) {
+        try {
+          const res = await fetch(`/api/tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId: created.id, title: taskList[i] }) });
+          const task = await res.json();
+          // Update temp task ID with real ID
+          updateData((prev) => recompute({
+            ...prev,
+            categories: prev.categories.map((c) => c.id === ctx.tempId ? {
+              ...c,
+              tasks: c.tasks.map((t, ti) => ti === i ? { id: task.id, title: t.title, done: t.done } : t),
+            } : c),
+          }));
+        } catch {}
+      }
     },
   });
 
@@ -1127,7 +1147,6 @@ function CategoryCard({
 }) {
   const colors = COLOR_MAP[cat.color] ?? COLOR_MAP.violet;
   const [newTask, setNewTask] = React.useState("");
-  const [showInput, setShowInput] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editText, setEditText] = React.useState("");
 
@@ -1135,7 +1154,6 @@ function CategoryCard({
     if (!newTask.trim()) return;
     onAddTask(newTask.trim());
     setNewTask("");
-    setShowInput(false);
   };
 
   const startEdit = (id: string, currentTitle: string) => {
@@ -1152,88 +1170,70 @@ function CategoryCard({
 
   return (
     <Card className={cn("border-zinc-800 backdrop-blur flex flex-col", colors.bg)}>
-      <div className="p-4 pb-2">
+      {/* Header: title + progress + delete */}
+      <div className="p-3.5 pb-2">
         <div className="flex items-center justify-between gap-2">
+          <span className={cn("text-sm font-bold", colors.text)}>{cat.name}</span>
           <div className="flex items-center gap-2">
-            <span className={cn("inline-flex h-6 items-center rounded-md border px-2 text-[11px] font-bold uppercase", colors.chip)}>{cat.name}</span>
-            <span className="text-xs text-zinc-400">{cat.doneCount}/{cat.tasks.length} done</span>
+            <span className="text-[11px] text-zinc-500 tabular-nums">{cat.doneCount}/{cat.tasks.length}</span>
+            <span className={cn("text-xs font-bold tabular-nums", colors.text)}>{cat.pct}%</span>
+            <button onClick={onDeleteCategory} className="text-zinc-600 hover:text-rose-400 transition-colors"><Trash2 className="h-3 w-3" /></button>
           </div>
-          <Button size="icon" variant="ghost" className="h-6 w-6 text-zinc-500 hover:text-rose-400" onClick={onDeleteCategory}>
-            <Trash2 className="h-3 w-3" />
-          </Button>
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-zinc-800">
-            <div className={cn("h-full rounded-full transition-all", colors.bar)} style={{ width: `${cat.pct}%` }} />
-          </div>
-          <span className={cn("text-sm font-bold tabular-nums", colors.text)}>{cat.pct}%</span>
+        {/* Progress bar */}
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+          <div className={cn("h-full rounded-full transition-all duration-300", colors.bar)} style={{ width: `${cat.pct}%` }} />
         </div>
       </div>
 
-      <div className="flex-1 px-4 pb-2">
-        <div className="flex flex-col gap-1 max-h-44 overflow-y-auto">
-          {cat.tasks.length === 0 && <p className="text-xs text-zinc-500 py-2 text-center">No tasks yet — add one below</p>}
+      {/* Tasks list */}
+      <div className="flex-1 px-3.5 pb-2 min-h-[2rem]">
+        <div className="flex flex-col gap-0.5 max-h-40 overflow-y-auto">
+          {cat.tasks.length === 0 && <p className="text-[11px] text-zinc-600 py-1.5 text-center italic">No tasks — type below to add</p>}
           {cat.tasks.map((t) => (
-            <div key={t.id} className="group flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-zinc-800/50">
+            <div key={t.id} className="group flex items-center gap-2 rounded px-1 py-1 hover:bg-zinc-800/40">
               <button onClick={() => onToggle(t.id)} className="shrink-0">
-                {t.done ? <CheckCircle2 className={cn("h-4 w-4", colors.text)} /> : <Circle className="h-4 w-4 text-zinc-600 hover:text-zinc-400" />}
+                {t.done
+                  ? <CheckCircle2 className={cn("h-4 w-4", colors.text)} />
+                  : <Circle className="h-4 w-4 text-zinc-600 hover:text-zinc-400" />}
               </button>
               {editingId === t.id ? (
-                <Input
+                <input
                   autoFocus
                   value={editText}
                   onChange={(e) => setEditText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") { setEditingId(null); setEditText(""); } }}
-                  className="h-7 flex-1 text-sm bg-zinc-800 border-zinc-700"
+                  onBlur={saveEdit}
+                  className="flex-1 text-sm bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 outline-none text-zinc-100"
                 />
               ) : (
                 <span
-                  onDoubleClick={() => startEdit(t.id, t.title)}
-                  className={cn("text-sm flex-1 truncate cursor-text", t.done ? "line-through text-zinc-500" : "text-zinc-200")}
-                  title="Double-click to edit"
+                  onClick={() => startEdit(t.id, t.title)}
+                  className={cn("text-sm flex-1 truncate cursor-pointer", t.done ? "line-through text-zinc-500" : "text-zinc-200")}
                 >{t.title}</span>
               )}
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                {editingId === t.id ? (
-                  <>
-                    <button onClick={saveEdit} className="text-emerald-400 hover:text-emerald-300"><Check className="h-3.5 w-3.5" /></button>
-                    <button onClick={() => { setEditingId(null); setEditText(""); }} className="text-zinc-500 hover:text-zinc-300"><X className="h-3.5 w-3.5" /></button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={() => startEdit(t.id, t.title)} className="text-zinc-500 hover:text-violet-300" title="Edit">
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                    <button onClick={() => onDeleteTask(t.id)} className="text-zinc-500 hover:text-rose-400">
-                      <X className="h-3 w-3" />
-                    </button>
-                  </>
-                )}
-              </div>
+              <button onClick={() => onDeleteTask(t.id)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 transition-all shrink-0">
+                <X className="h-3 w-3" />
+              </button>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="p-3 border-t border-zinc-800/60">
-        {showInput ? (
-          <div className="flex items-center gap-1.5">
-            <Input
-              autoFocus
-              value={newTask}
-              onChange={(e) => setNewTask(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") { setShowInput(false); setNewTask(""); } }}
-              placeholder="Task title..."
-              className="h-8 border-zinc-700 bg-zinc-800 text-sm"
-            />
-            <Button size="sm" className="h-8 px-2" onClick={submit}><Check className="h-3.5 w-3.5" /></Button>
-            <Button size="sm" variant="ghost" className="h-8 px-2 text-zinc-400" onClick={() => { setShowInput(false); setNewTask(""); }}><X className="h-3.5 w-3.5" /></Button>
-          </div>
-        ) : (
-          <Button size="sm" variant="ghost" className="w-full text-zinc-400 hover:text-zinc-200" onClick={() => setShowInput(true)}>
-            <Plus className="h-3.5 w-3.5" /> Add task
-          </Button>
-        )}
+      {/* Always-visible add task input */}
+      <div className="p-2.5 border-t border-zinc-800/60">
+        <div className="flex items-center gap-1.5">
+          <input
+            value={newTask}
+            onChange={(e) => setNewTask(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && newTask.trim()) { onAddTask(newTask.trim()); setNewTask(""); } }}
+            placeholder="Add task + Enter"
+            className="flex-1 h-8 text-sm bg-zinc-800/60 border border-zinc-700 rounded px-2.5 outline-none text-zinc-200 placeholder:text-zinc-600 focus:border-violet-500/40"
+          />
+          {newTask.trim() && (
+            <button onClick={() => { onAddTask(newTask.trim()); setNewTask(""); }} className="h-8 w-8 rounded bg-violet-600 hover:bg-violet-500 text-white flex items-center justify-center shrink-0"><Plus className="h-4 w-4" /></button>
+          )}
+        </div>
       </div>
     </Card>
   );
@@ -1242,8 +1242,9 @@ function CategoryCard({
 function AddCategoryDialog({ open, onOpenChange, onSubmit }: { open: boolean; onOpenChange: (o: boolean) => void; onSubmit: (b: Record<string, unknown>) => void }) {
   const [name, setName] = React.useState("");
   const [color, setColor] = React.useState("violet");
+  const [tasks, setTasks] = React.useState("");
 
-  React.useEffect(() => { if (open) { setName(""); setColor("violet"); } }, [open]);
+  React.useEffect(() => { if (open) { setName(""); setColor("violet"); setTasks(""); } }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1252,7 +1253,7 @@ function AddCategoryDialog({ open, onOpenChange, onSubmit }: { open: boolean; on
         <div className="flex flex-col gap-3 py-2">
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-zinc-400">Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pinterest, Blog, Money, Gym..." className="bg-zinc-800 border-zinc-700" autoFocus />
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Pinterest, Blog, Money, Gym, Food..." className="bg-zinc-800 border-zinc-700" autoFocus />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-zinc-400">Color</Label>
@@ -1262,11 +1263,22 @@ function AddCategoryDialog({ open, onOpenChange, onSubmit }: { open: boolean; on
               ))}
             </div>
           </div>
-          <p className="text-[11px] text-zinc-500">You can add tasks inside the category after creating it. Progress is calculated from tasks done vs total tasks.</p>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-zinc-400">Tasks (one per line, optional)</Label>
+            <textarea
+              value={tasks}
+              onChange={(e) => setTasks(e.target.value)}
+              placeholder={"Write article\nSEO optimize\nAdd images\n..."}
+              className="bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none min-h-[80px] resize-y"
+            />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" className="border-zinc-700 bg-zinc-800 text-zinc-200" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button className="bg-violet-600 hover:bg-violet-500 text-white" disabled={!name} onClick={() => onSubmit({ name, color })}>Add Category</Button>
+          <Button className="bg-violet-600 hover:bg-violet-500 text-white" disabled={!name} onClick={() => {
+            const taskList = tasks.split("\n").map(t => t.trim()).filter(Boolean);
+            onSubmit({ name, color, tasks: taskList });
+          }}>Add Category</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
