@@ -226,6 +226,8 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   // Smart Task Board state
   const [quickTaskText, setQuickTaskText] = React.useState("");
   const [quickTaskTag, setQuickTaskTag] = React.useState("");
+  const [tagInput, setTagInput] = React.useState("");
+  const [tagDropdownOpen, setTagDropdownOpen] = React.useState(false);
   const [taskFilter, setTaskFilter] = React.useState<string>("all");
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null);
   const [editingTaskText, setEditingTaskText] = React.useState("");
@@ -248,42 +250,57 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   };
 
   // Smart Task Board: quick add task with optional tag
-  // If no tag selected, add to first category or create "General" locally
+  // If tag text typed doesn't match existing → creates new tag automatically
   const handleQuickAdd = () => {
     const title = quickTaskText.trim();
     if (!title) return;
 
+    // Determine tag: selected categoryId, or typed tag name, or "General"
     let categoryId = quickTaskTag;
-    const existingCats = data?.categories ?? [];
-
-    // If no tag selected, use first category or create "General" locally
-    if (!categoryId) {
-      if (existingCats.length > 0) {
-        categoryId = existingCats[0].id;
+    const tagName = tagInput.trim();
+    
+    if (!categoryId && tagName) {
+      // Check if tag already exists (case insensitive)
+      const existing = (data?.categories ?? []).find((c) => c.name.toLowerCase() === tagName.toLowerCase());
+      if (existing) {
+        categoryId = existing.id;
       } else {
-        // Create "General" category locally (optimistic)
+        // Create new tag locally (optimistic) with auto color
+        const tagColors = ["violet", "sky", "emerald", "amber", "rose", "cyan"];
+        const colorIdx = (data?.categories.length ?? 0) % tagColors.length;
         categoryId = `temp-cat-${Date.now()}`;
         const tempCat: Category = {
-          id: categoryId, name: "General", dailyTarget: 0,
-          color: "violet", icon: "FileText",
+          id: categoryId, name: tagName, dailyTarget: 0,
+          color: tagColors[colorIdx], icon: "FileText",
           doneCount: 0, remaining: 0, pct: 0, tasks: [],
         };
         updateData((prev) => recompute({ ...prev, categories: [...prev.categories, tempCat] }));
-        // Also create on server (background)
-        fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "General", color: "violet" }) })
+        // Create on server (background)
+        fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: tagName, color: tagColors[colorIdx] }) })
           .then((r) => r.json())
           .then((created) => {
-            updateData((prev) => ({
-              ...prev,
-              categories: prev.categories.map((c) => c.id === categoryId ? { ...c, id: created.id } : c),
-            }));
-            categoryId = created.id;
+            if (created.id) {
+              updateData((prev) => ({
+                ...prev,
+                categories: prev.categories.map((c) => c.id === categoryId ? { ...c, id: created.id } : c),
+              }));
+            }
           })
           .catch(() => {});
       }
+    } else if (!categoryId && !tagName) {
+      // No tag selected and no tag typed → use first or create "General"
+      const cats = data?.categories ?? [];
+      if (cats.length > 0) {
+        categoryId = cats[0].id;
+      } else {
+        categoryId = `temp-cat-${Date.now()}`;
+        updateData((prev) => recompute({ ...prev, categories: [...prev.categories, { id: categoryId, name: "General", dailyTarget: 0, color: "violet", icon: "FileText", doneCount: 0, remaining: 0, pct: 0, tasks: [] }] }));
+        fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "General", color: "violet" }) }).then((r) => r.json()).then((created) => { if (created.id) { updateData((prev) => ({ ...prev, categories: prev.categories.map((c) => c.id === categoryId ? { ...c, id: created.id } : c) })); } }).catch(() => {});
+      }
     }
 
-    // Add task to local data (optimistic)
+    // Add task to local data (optimistic + instant)
     const tempTaskId = `temp-task-${Date.now()}`;
     updateData((prev) => {
       const cats = prev.categories.map((c) => {
@@ -309,6 +326,8 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
       .catch(() => {});
 
     setQuickTaskText("");
+    setTagInput("");
+    setQuickTaskTag("");
   };
 
   const recompute = (d: TodayData): TodayData => {
@@ -1004,25 +1023,52 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
 
           {/* Quick Add Bar */}
           <div className="flex items-center gap-2 mb-3">
+            {/* Task input */}
             <input
               value={quickTaskText}
               onChange={(e) => setQuickTaskText(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && quickTaskText.trim()) { handleQuickAdd(); } }}
-              placeholder="Add a task... (press Enter)"
+              placeholder="Add a task... + Enter"
               className="flex-1 h-10 text-sm bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 outline-none text-zinc-200 placeholder:text-zinc-600 focus:border-violet-500/40"
               autoFocus
             />
-            {/* Tag selector */}
-            <select
-              value={quickTaskTag}
-              onChange={(e) => setQuickTaskTag(e.target.value)}
-              className="h-10 text-xs bg-zinc-800 border border-zinc-700 rounded-lg px-2 outline-none text-zinc-300 cursor-pointer"
-            >
-              <option value="">No tag</option>
-              {(data?.categories ?? []).map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            {/* Tag input — type existing or new tag name */}
+            <div className="relative shrink-0">
+              <input
+                value={tagInput}
+                onChange={(e) => { setTagInput(e.target.value); setQuickTaskTag(""); setTagDropdownOpen(true); }}
+                onFocus={() => setTagDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setTagDropdownOpen(false), 150)}
+                onKeyDown={(e) => { if (e.key === "Enter" && quickTaskText.trim()) { handleQuickAdd(); } }}
+                placeholder="tag..."
+                className="h-10 w-24 text-xs bg-zinc-800/60 border border-zinc-700 rounded-lg px-2.5 outline-none text-zinc-300 placeholder:text-zinc-600 focus:border-violet-500/40"
+              />
+              {/* Dropdown of existing tags */}
+              {tagDropdownOpen && (data?.categories ?? []).length > 0 && (
+                <div className="absolute top-full right-0 mt-1 z-20 w-40 rounded-lg border border-zinc-700 bg-zinc-800/95 backdrop-blur p-1 max-h-40 overflow-y-auto shadow-xl">
+                  {(data?.categories ?? []).filter((c) => !tagInput || c.name.toLowerCase().includes(tagInput.toLowerCase())).map((c) => {
+                    const colors = COLOR_MAP[c.color] ?? COLOR_MAP.violet;
+                    return (
+                      <button
+                        key={c.id}
+                        onMouseDown={(e) => { e.preventDefault(); setTagInput(c.name); setQuickTaskTag(c.id); setTagDropdownOpen(false); }}
+                        className="flex items-center gap-1.5 w-full text-left text-xs text-zinc-300 hover:bg-zinc-700/50 rounded px-2 py-1.5"
+                      >
+                        <span className={cn("h-2 w-2 rounded-full", colors.bar)} /> {c.name}
+                      </button>
+                    );
+                  })}
+                  {tagInput.trim() && !(data?.categories ?? []).some((c) => c.name.toLowerCase() === tagInput.trim().toLowerCase()) && (
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); setQuickTaskTag(""); setTagDropdownOpen(false); }}
+                      className="flex items-center gap-1.5 w-full text-left text-xs text-violet-300 hover:bg-violet-500/10 rounded px-2 py-1.5 border-t border-zinc-700 mt-1"
+                    >
+                      <Plus className="h-3 w-3" /> Create "{tagInput.trim()}"
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
             {quickTaskText.trim() && (
               <button onClick={handleQuickAdd} className="h-10 px-4 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium shrink-0">Add</button>
             )}
