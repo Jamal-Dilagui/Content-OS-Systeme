@@ -185,7 +185,7 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   // in-memory store resets on every cold start, so we can't rely on server).
   // Server is ONLY used for the very first visit (seed data). After that, all
   // reads come from localStorage, all writes go to localStorage.
-  const CACHE_VERSION = "v8-clean-categories";
+  const CACHE_VERSION = "v9-smart-tasks";
   const STORAGE_KEY = `content-os-today-${CACHE_VERSION}`;
 
   // Check localStorage ONCE on mount — if we have data, never fetch from server
@@ -223,6 +223,12 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   const [addObjOpen, setAddObjOpen] = React.useState(false);
   const [accSwitcherOpen, setAccSwitcherOpen] = React.useState(false);
   const [chartView, setChartView] = React.useState<"weekly" | "monthly">("weekly");
+  // Smart Task Board state
+  const [quickTaskText, setQuickTaskText] = React.useState("");
+  const [quickTaskTag, setQuickTaskTag] = React.useState("");
+  const [taskFilter, setTaskFilter] = React.useState<string>("all");
+  const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null);
+  const [editingTaskText, setEditingTaskText] = React.useState("");
   // localData is the SOLE source of truth for the UI (query is disabled after first load)
   const [localData, setLocalData] = React.useState<TodayData | undefined>(queryData);
   const data = localData;
@@ -239,6 +245,57 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
       return next; // triggers re-render → chart + daily states update live
     });
+  };
+
+  // Smart Task Board: quick add task with optional tag
+  // If tag doesn't exist, creates it automatically
+  const handleQuickAdd = async () => {
+    const title = quickTaskText.trim();
+    if (!title) return;
+
+    let categoryId = quickTaskTag;
+    const tagColors = ["violet", "sky", "emerald", "amber", "rose", "cyan"];
+
+    // If no tag selected, add to first category or create "General"
+    if (!categoryId) {
+      const cats = data?.categories ?? [];
+      if (cats.length > 0) {
+        categoryId = cats[0].id;
+      } else {
+        // Create a "General" category on the fly
+        try {
+          const res = await fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "General", color: "violet" }) });
+          const created = await res.json();
+          categoryId = created.id;
+        } catch {}
+      }
+    }
+
+    // Optimistic: add task to local data
+    const tempTaskId = `temp-task-${Date.now()}`;
+    const cat = (data?.categories ?? []).find((c) => c.id === categoryId);
+    updateData((prev) => recompute({
+      ...prev,
+      categories: prev.categories.map((c) => {
+        if (c.id !== categoryId) return c;
+        const tasks = [...c.tasks, { id: tempTaskId, title, done: false }];
+        const doneCount = tasks.filter((t) => t.done).length;
+        return { ...c, tasks, doneCount, remaining: Math.max(0, tasks.length - doneCount), pct: tasks.length > 0 ? Math.min(100, Math.round((doneCount / tasks.length) * 100)) : 0, dailyTarget: tasks.length };
+      }),
+    }));
+
+    // Create on server
+    try {
+      const res = await fetch(`/api/tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId, title }) });
+      const task = await res.json();
+      // Replace temp ID with real ID
+      updateData((prev) => recompute({
+        ...prev,
+        categories: prev.categories.map((c) => c.id === categoryId ? { ...c, tasks: c.tasks.map((t) => t.id === tempTaskId ? { id: task.id, title: task.title, done: false } : t) } : c),
+      }));
+    } catch {}
+
+    setQuickTaskText("");
   };
 
   const recompute = (d: TodayData): TodayData => {
@@ -903,30 +960,141 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
           </Card>
         </div>
 
-        {/* ============ 3. CATEGORIES (TASKS STATES) ============ */}
-        <div className="mb-5">
-          <div className="flex items-center justify-between mb-3">
+        {/* ============ 3. SMART TASK BOARD ============ */}
+        <Card className="mb-5 border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur">
+          {/* Header with progress ring */}
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-sky-400" />
-              <h2 className="text-sm font-bold">Categories · Tasks</h2>
-              <span className="text-xs text-zinc-500">({data?.categories.length ?? 0})</span>
+              <h2 className="text-sm font-bold">Today's Tasks</h2>
             </div>
-            <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 h-8" onClick={() => setAddCatOpen(true)}><PlusIcon className="h-4 w-4" /> Add Category</Button>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {isLoading
-              ? Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-48 bg-zinc-800" />)
-              : data?.categories.length === 0 ? (
-                <div className="sm:col-span-2 lg:col-span-3 rounded-lg border border-dashed border-zinc-800 p-8 text-center">
-                  <CheckCircle2 className="h-10 w-10 text-zinc-700 mx-auto mb-2" />
-                  <p className="text-sm text-zinc-400">No categories yet</p>
-                  <p className="text-xs text-zinc-600 mt-1">Add categories like Pinterest, Blog, Money, Gym to track your daily tasks</p>
+            {(() => {
+              const allTasks = (data?.categories ?? []).flatMap((c) => c.tasks);
+              const doneCount = allTasks.filter((t) => t.done).length;
+              const total = allTasks.length;
+              const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+              return (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-zinc-500 tabular-nums">{doneCount}/{total}</span>
+                  {/* Circular progress ring */}
+                  <div className="relative h-9 w-9">
+                    <svg className="h-9 w-9 -rotate-90" viewBox="0 0 36 36">
+                      <circle cx="18" cy="18" r="15" fill="none" stroke="#27272a" strokeWidth="3" />
+                      <circle cx="18" cy="18" r="15" fill="none" stroke={pct >= 100 ? "#10b981" : pct >= 50 ? "#f59e0b" : "#f43f5e"} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(pct / 100) * 94.2} 94.2`} className="transition-all duration-500" />
+                    </svg>
+                    <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold tabular-nums text-zinc-300">{pct}%</span>
+                  </div>
                 </div>
-              ) : data?.categories.map((cat) => (
-                <CategoryCard key={cat.id} cat={cat} onToggle={(id) => toggleTask.mutate(id)} onAddTask={(title) => addTask.mutate({ categoryId: cat.id, title })} onDeleteTask={(id) => deleteTask.mutate(id)} onEditTask={(id, title) => editTask.mutate({ id, title })} onDeleteCategory={() => deleteCategory.mutate(cat.id)} />
-              ))}
+              );
+            })()}
           </div>
-        </div>
+
+          {/* Quick Add Bar */}
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              value={quickTaskText}
+              onChange={(e) => setQuickTaskText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && quickTaskText.trim()) { handleQuickAdd(); } }}
+              placeholder="Add a task... (press Enter)"
+              className="flex-1 h-10 text-sm bg-zinc-800/60 border border-zinc-700 rounded-lg px-3 outline-none text-zinc-200 placeholder:text-zinc-600 focus:border-violet-500/40"
+              autoFocus
+            />
+            {/* Tag selector */}
+            <select
+              value={quickTaskTag}
+              onChange={(e) => setQuickTaskTag(e.target.value)}
+              className="h-10 text-xs bg-zinc-800 border border-zinc-700 rounded-lg px-2 outline-none text-zinc-300 cursor-pointer"
+            >
+              <option value="">No tag</option>
+              {(data?.categories ?? []).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {quickTaskText.trim() && (
+              <button onClick={handleQuickAdd} className="h-10 px-4 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium shrink-0">Add</button>
+            )}
+          </div>
+
+          {/* Tag filter pills */}
+          {(data?.categories ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              <button onClick={() => setTaskFilter("all")} className={cn("rounded-full px-2.5 py-1 text-[10px] font-medium border transition-all", taskFilter === "all" ? "border-violet-500/50 bg-violet-500/15 text-violet-200" : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200")}>All</button>
+              {(data?.categories ?? []).map((c) => {
+                const colors = COLOR_MAP[c.color] ?? COLOR_MAP.violet;
+                return (
+                  <button key={c.id} onClick={() => setTaskFilter(taskFilter === c.id ? "all" : c.id)} className={cn("rounded-full px-2.5 py-1 text-[10px] font-medium border transition-all", taskFilter === c.id ? colors.chip : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200")}>
+                    {c.name} ({c.tasks.filter((t) => !t.done).length})
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Task list */}
+          {isLoading ? <Skeleton className="h-32 bg-zinc-800" /> : (() => {
+            const allTasks = (data?.categories ?? []).flatMap((c) => c.tasks.map((t) => ({ ...t, categoryId: c.id, categoryName: c.name, categoryColor: c.color })));
+            const filtered = taskFilter === "all" ? allTasks : allTasks.filter((t) => t.categoryId === taskFilter);
+            const undone = filtered.filter((t) => !t.done);
+            const done = filtered.filter((t) => t.done);
+
+            if (allTasks.length === 0) {
+              return (
+                <div className="rounded-lg border border-dashed border-zinc-800 p-8 text-center">
+                  <CheckCircle2 className="h-10 w-10 text-zinc-700 mx-auto mb-2" />
+                  <p className="text-sm text-zinc-400">No tasks yet</p>
+                  <p className="text-xs text-zinc-600 mt-1">Type above to add your first task — add a tag to organize (Blog, Pinterest, Gym, Food...)</p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="flex flex-col gap-0.5">
+                {/* Undone tasks */}
+                {undone.map((t) => {
+                  const colors = COLOR_MAP[t.categoryColor] ?? COLOR_MAP.violet;
+                  return (
+                    <div key={t.id} className="group flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-zinc-800/40 transition-colors">
+                      <button onClick={() => toggleTask.mutate(t.id)} className="shrink-0">
+                        <Circle className="h-5 w-5 text-zinc-600 hover:text-emerald-400 transition-colors" />
+                      </button>
+                      <span onClick={() => { setEditingTaskId(t.id); setEditingTaskText(t.title); }} className="text-sm flex-1 cursor-pointer text-zinc-200 hover:text-white truncate">
+                        {editingTaskId === t.id ? (
+                          <input
+                            autoFocus
+                            value={editingTaskText}
+                            onChange={(e) => setEditingTaskText(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") { editTask.mutate({ id: editingTaskId, title: editingTaskText }); setEditingTaskId(null); } if (e.key === "Escape") setEditingTaskId(null); }}
+                            onBlur={() => { if (editingTaskId) { editTask.mutate({ id: editingTaskId, title: editingTaskText }); setEditingTaskId(null); } }}
+                            className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 outline-none w-full"
+                          />
+                        ) : t.title}
+                      </span>
+                      <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase border shrink-0", colors.chip)}>{t.categoryName}</span>
+                      <button onClick={() => deleteTask.mutate(t.id)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 shrink-0 transition-all"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  );
+                })}
+                {/* Done tasks */}
+                {done.length > 0 && (
+                  <>
+                    <div className="text-[10px] uppercase text-zinc-600 font-bold pt-2 pb-1">✓ Completed ({done.length})</div>
+                    {done.map((t) => {
+                      const colors = COLOR_MAP[t.categoryColor] ?? COLOR_MAP.violet;
+                      return (
+                        <div key={t.id} className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 opacity-50 hover:opacity-70 transition-opacity">
+                          <button onClick={() => toggleTask.mutate(t.id)} className="shrink-0"><CheckCircle2 className="h-5 w-5 text-emerald-500" /></button>
+                          <span className="text-sm flex-1 line-through text-zinc-500 truncate">{t.title}</span>
+                          <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-bold uppercase border shrink-0", colors.chip)}>{t.categoryName}</span>
+                          <button onClick={() => deleteTask.mutate(t.id)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-rose-400 shrink-0 transition-all"><X className="h-3.5 w-3.5" /></button>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            );
+          })()}
+        </Card>
 
         {/* ============ 4. OBJECTIVES (OBJECTIF STATES) ============ */}
         <div className="mb-5">
