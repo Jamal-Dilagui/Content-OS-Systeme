@@ -248,52 +248,65 @@ function AppContent({ session, onLogout }: { session: Session; onLogout: () => v
   };
 
   // Smart Task Board: quick add task with optional tag
-  // If tag doesn't exist, creates it automatically
-  const handleQuickAdd = async () => {
+  // If no tag selected, add to first category or create "General" locally
+  const handleQuickAdd = () => {
     const title = quickTaskText.trim();
     if (!title) return;
 
     let categoryId = quickTaskTag;
-    const tagColors = ["violet", "sky", "emerald", "amber", "rose", "cyan"];
+    const existingCats = data?.categories ?? [];
 
-    // If no tag selected, add to first category or create "General"
+    // If no tag selected, use first category or create "General" locally
     if (!categoryId) {
-      const cats = data?.categories ?? [];
-      if (cats.length > 0) {
-        categoryId = cats[0].id;
+      if (existingCats.length > 0) {
+        categoryId = existingCats[0].id;
       } else {
-        // Create a "General" category on the fly
-        try {
-          const res = await fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "General", color: "violet" }) });
-          const created = await res.json();
-          categoryId = created.id;
-        } catch {}
+        // Create "General" category locally (optimistic)
+        categoryId = `temp-cat-${Date.now()}`;
+        const tempCat: Category = {
+          id: categoryId, name: "General", dailyTarget: 0,
+          color: "violet", icon: "FileText",
+          doneCount: 0, remaining: 0, pct: 0, tasks: [],
+        };
+        updateData((prev) => recompute({ ...prev, categories: [...prev.categories, tempCat] }));
+        // Also create on server (background)
+        fetch(`/api/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "General", color: "violet" }) })
+          .then((r) => r.json())
+          .then((created) => {
+            updateData((prev) => ({
+              ...prev,
+              categories: prev.categories.map((c) => c.id === categoryId ? { ...c, id: created.id } : c),
+            }));
+            categoryId = created.id;
+          })
+          .catch(() => {});
       }
     }
 
-    // Optimistic: add task to local data
+    // Add task to local data (optimistic)
     const tempTaskId = `temp-task-${Date.now()}`;
-    const cat = (data?.categories ?? []).find((c) => c.id === categoryId);
-    updateData((prev) => recompute({
-      ...prev,
-      categories: prev.categories.map((c) => {
+    updateData((prev) => {
+      const cats = prev.categories.map((c) => {
         if (c.id !== categoryId) return c;
         const tasks = [...c.tasks, { id: tempTaskId, title, done: false }];
         const doneCount = tasks.filter((t) => t.done).length;
         return { ...c, tasks, doneCount, remaining: Math.max(0, tasks.length - doneCount), pct: tasks.length > 0 ? Math.min(100, Math.round((doneCount / tasks.length) * 100)) : 0, dailyTarget: tasks.length };
-      }),
-    }));
+      });
+      return recompute({ ...prev, categories: cats });
+    });
 
-    // Create on server
-    try {
-      const res = await fetch(`/api/tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId, title }) });
-      const task = await res.json();
-      // Replace temp ID with real ID
-      updateData((prev) => recompute({
-        ...prev,
-        categories: prev.categories.map((c) => c.id === categoryId ? { ...c, tasks: c.tasks.map((t) => t.id === tempTaskId ? { id: task.id, title: task.title, done: false } : t) } : c),
-      }));
-    } catch {}
+    // Create on server (background)
+    fetch(`/api/tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId, title }) })
+      .then((r) => r.json())
+      .then((task) => {
+        if (task.id) {
+          updateData((prev) => recompute({
+            ...prev,
+            categories: prev.categories.map((c) => c.id === categoryId ? { ...c, tasks: c.tasks.map((t) => t.id === tempTaskId ? { id: task.id, title: task.title || t.title, done: false } : t) } : c),
+          }));
+        }
+      })
+      .catch(() => {});
 
     setQuickTaskText("");
   };
